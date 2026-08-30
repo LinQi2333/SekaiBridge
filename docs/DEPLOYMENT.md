@@ -71,7 +71,7 @@ flowchart LR
 | NoneBot2 → Node | REST `GET/POST/PATCH/DELETE /api/...` | 头：`X-API-Token`（= `API_TOKEN`）、`X-QQ-User`、`X-QQ-Group`；权限按 §41（管理员 / 成员 / 群白名单） |
 | NoneBot2 → Node | `GET /api/notifications` + `POST /api/notifications/:id/ack` | token 鉴权；返回待发送通知（文本 + 截图路径 + 视频封面路径） |
 | NoneBot2 → Node | `POST /api/messages/dedupe` | body `{message_id}` → `{duplicate:bool}`（§43 消息去重） |
-| Node → Bilibili | `POST api.vc.bilibili.com/api/v1/web/image` | multipart `file` + wbi 签名（`w_rid`/`wts`）+ Cookie（`SESSDATA`/`bili_jct`/`DedeUserID`）→ `data.image_url` |
+| Node → Bilibili | `POST api.bilibili.com/x/dynamic/feed/draw/upload_bfs` | multipart `file_up` + `category=daily` + `csrf=bili_jct` + Cookie → `data.image_url`（旧接口 `api/vc.bilibili.com/api/v1/web/image` 已下线） |
 | Node → Bilibili | `POST api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create` | form `type=4, biz_id=pics[], content, topic_id?, csrf=bili_jct` + wbi 签名 → `data.dynamic_id` |
 | Node 内部 | 服务 → 客户端 / Repositories | 进程内 TS 方法调用；Repositories → SQLite（WAL、`foreign_keys=ON`） |
 
@@ -619,6 +619,10 @@ docker compose exec app rm -rf /app/cache/screenshots /app/cache/twitter-photos 
 2. 按 4.3 节重新获取三个 Cookie 值；
 3. 更新 `.env` → `docker compose up -d` 重启；
 4. 群内执行 `/重试 <编号>` 重新发布。
+
+> 提示：**Bilibili 必须直连**（程序已自动处理）。若走 HTTP 代理访问 B 站，
+> 出口 IP 与登录 IP 不一致会触发 CSRF 校验失败（`-111` 登录失效），
+> 表现为发布报 `BILIBILI_AUTH`。Twitter 媒体与 TweetToaster 仍走 `HTTPS_PROXY`。
 
 ### 8.5 更新程序
 
