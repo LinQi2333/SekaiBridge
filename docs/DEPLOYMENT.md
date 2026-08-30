@@ -90,10 +90,10 @@ flowchart LR
 
 | 项目 | 要求 |
 | --- | --- |
-| 操作系统 | Linux（推荐） / Windows / macOS |
-| 内存 | ≥ 2 GB（Chromium 渲染 + Node） |
-| 磁盘 | ≥ 10 GB（缓存图片、数据库） |
-| 网络 | 可访问 x.com 数据源（TweetToaster 需要）、api.vc.bilibili.com、QQ 服务 |
+| 操作系统 | Linux（Ubuntu 20+ / Debian 10+ / CentOS 9；arm64 亦可） |
+| 内存 | ≥ 2 GB（Chromium 渲染 + Node + QQ） |
+| 磁盘 | ≥ 10 GB（缓存图片、数据库、QQ 数据） |
+| 网络 | 可访问 x.com 数据源（TweetToaster 需要）、api.bilibili.com、QQ 服务 |
 
 ### 3.2 运行时（二选一）
 
@@ -143,27 +143,24 @@ pnpm start   # 默认 8082
 
 > 说明：主程序只调用 TweetToaster 的 `POST /api/tweet`、`POST /api/render`、`GET /api/get_task=<id>`、`GET /api/health`，不直接抓取 Twitter（规格 §14）。
 
-### 4.2 QQ 侧：NapCat + NoneBot2
+### 4.2 QQ 侧：NapCat（Docker）+ NoneBot2
 
-本方案中 **NoneBot2（Python）负责 QQ 消息收发**，NapCat 是 OneBot 11 协议实现。
+本方案中 **NoneBot2（Python）负责 QQ 消息收发**，NapCat 是 OneBot 11 协议实现，以 Docker 容器运行（内置 Linux 版 QQ 无头客户端）。
 
-**NapCat（QQ 协议端）**
+**NapCat（QQ 协议端，Docker）**
 
-1. 从 [NapCatQQ 官方发布页](https://github.com/NapNeko/NapCatQQ/releases) 下载对应平台的安装包；
-2. 使用**机器人 QQ 小号**登录 NapCat；
-3. 打开 NapCat 面板 → 网络配置 → 添加 **WebSocket 服务端（正向 WS）**，端口建议 `3001`，Access Token 可留空（主程序不直连 NapCat，token 由 NoneBot2 侧管理）；
+本仓库 `docker-compose.yml` 已包含 `napcat` 服务，`./start.sh` 一键拉起：
+
+1. 启动后浏览器打开 `http://<服务器IP>:6099/webui`（token 见 `docker compose logs napcat`）；
+2. WebUI 中**扫码登录机器人 QQ 小号**（手机 QQ 确认）；
+3. 若 OneBot WS（3001）未监听：WebUI → 网络配置 → 新建 **WebSocket 服务端**，端口 `3001`，Access Token 可留空；
 4. 记录：
    - **QQ 群号**：机器人所在群的群号（`QQ_GROUP_IDS`）；
    - **管理员 QQ 号**：你自己的 QQ 号（`QQ_ADMIN_IDS`）。
 
-**NoneBot2（Bot 框架）**
+**NoneBot2（Bot 框架，容器化）**
 
-```bash
-# Python ≥ 3.10
-pip install nonebot2[fastapi] nonebot-adapter-onebot
-```
-
-创建机器人项目并配置连接 NapCat（WebSocket 反向连接地址：`ws://127.0.0.1:3001`），具体步骤见 [NoneBot2 文档](https://nonebot.dev/)。插件参考实现见本文档第 7 节。
+`docker-compose.yml` 的 `nonebot2` 服务已容器化（`nonebot-plugin/`），配置全部来自环境变量（compose 中注入）。如需在宿主机单独开发运行，可参考第 7 节插件实现与 `nonebot-plugin/README.md`。
 
 > 说明：部署时 QQ 侧独立于主程序运行（规格 §58），不要把 QQ 客户端塞进主应用容器。
 
@@ -206,10 +203,7 @@ curl -s 'https://api.bilibili.com/x/web-interface/nav' \
 主程序 HTTP API 的共享密钥（NoneBot2 调用时放在 `X-API-Token` 头）：
 
 ```bash
-# Linux / macOS
 openssl rand -hex 32
-# Windows PowerShell
-[System.Security.Cryptography.RandomNumberGenerator]::GetBytes(32) | ForEach-Object { $_.ToString('x2') } -join ''
 ```
 
 得到一个 64 位十六进制字符串，填入 `.env` 的 `API_TOKEN=`。
@@ -288,7 +282,7 @@ cp .env.example .env
 # 3. 一键拉起全部服务（主程序 + TweetToaster + NapCat + NoneBot2）
 docker compose up -d --build
 
-# 4. 登录机器人 QQ（Linux 下用 WebUI 扫码，与 Windows 不同）
+# 4. 登录机器人 QQ（Linux 下用 WebUI 扫码登录）
 docker compose logs napcat | grep -i "webui\|token"   # 查看 WebUI token
 # 浏览器打开 http://<服务器IP>:6099/webui
 # 输入 token → 扫码登录机器人 QQ（手机 QQ 确认）
@@ -305,50 +299,17 @@ curl http://127.0.0.1:18080/api/health
 | `napcat` | `mlikiowa/napcat-docker:latest` | 6099（WebUI）+ 3001（OneBot WS） | Linux QQ 无头版 |
 | `nonebot2` | `nonebot-plugin/` 构建 | 内网 | QQ 命令 + 通知轮询 |
 
-**Windows 与本方案的差异**（QQ 侧）：
-
-| 项目 | Windows 本机（已实测） | Linux / Docker |
-| --- | --- | --- |
-| QQ 客户端 | 本机已装的 Windows QQNT | 镜像内置 Linux 版 QQ（无头） |
-| NapCat 启动 | `napiLoader.bat` 注入 | 容器自启动 |
-| 登录方式 | QQ 窗口登录 | WebUI `:6099` 扫码 |
-| OneBot WS | `127.0.0.1:3001` | `:3001`（容器内 `napcat:3001`） |
-| NoneBot2 运行 | venv + `bot.py` | 容器（`nonebot-plugin/`） |
-
-> 上层（主程序 HTTP API、NoneBot2 插件）**零改动**，两端接口完全一致。
-
-### 6.1 Docker Compose 部署（Windows 本机验证版）
+### 6.1 常用命令
 
 ```bash
-# 1. 克隆 / 拷贝项目
-git clone <你的仓库地址> twitter-qq-bilibili
-cd twitter-qq-bilibili
-
-# 2. 创建配置
-cp .env.example .env
-# 编辑 .env，填入第 5 节内容（QQ 群/管理员、Bili Cookie、API_TOKEN 必填）
-
-# 3. 启动（首次会构建镜像并拉取 TweetToaster）
-docker compose up -d --build
-
-# 4. 查看日志确认启动成功
-docker compose logs -f app
-# 应看到：monitor started / source validation started / api listening on ...:18080
-
-# 5. 健康检查
-curl http://127.0.0.1:18080/api/health
-# → {"ok":true,"data":{"status":"ok","database":"ok","tweettoaster":"ok","qq":"external"}}
-```
-
-**常用命令**
-
-```bash
-docker compose ps              # 服务状态
-docker compose logs -f app     # 主程序日志
-docker compose pull            # 更新 TweetToaster 镜像
-docker compose up -d --build   # 更新主程序
-docker compose down            # 停止（保留数据卷）
-docker compose down -v         # 停止并删除数据（慎用！会清空数据库）
+./start.sh                  # 一键启动 + 状态（推荐）
+./start.sh status           # 服务状态 + 健康检查
+docker compose ps           # 容器状态
+docker compose logs -f app  # 主程序日志
+docker compose pull         # 更新 TweetToaster 镜像
+docker compose up -d --build  # 更新主程序
+docker compose down         # 停止（保留数据卷）
+docker compose down -v      # 停止并删除数据（慎用！会清空数据库）
 ```
 
 ### 6.2 本机直接运行（开发 / 无 Docker）

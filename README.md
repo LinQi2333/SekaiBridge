@@ -1,136 +1,180 @@
 # Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统
 
-> 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
-> **部署请看 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**（环境、配置、Cookie 获取、Docker、NoneBot2 插件示例、运维与 FAQ）。
-> 架构图：[`docs/architecture.svg`](docs/architecture.svg)
+自动监听 Twitter/X 账户 → 新推文截图并通知 QQ 群 → 群成员提交最终翻译 → 管理员发布到 Bilibili 动态（含原图与话题）。
 
-## 架构总览（接口协作图）
+- 完整实施规格：[`twitter_qq_bilibili_solution_v0.3.md`](twitter_qq_bilibili_solution_v0.3.md)
+- 详细部署参考：[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
+- 架构图：[`docs/architecture.svg`](docs/architecture.svg)
+
+> 本系统面向 **Linux 服务器（Docker）** 部署，不支持 Windows 部署。
+
+---
+
+## 架构
 
 ![系统架构（接口协作）](docs/architecture.svg)
 
-关键接口（详见图中标注与 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)）：
+```text
+Twitter/X ──► TweetToaster ──► app（主程序，Node + SQLite，:18080）
+                                        │  HTTP API
+QQ 群 ◄──► NoneBot2 ◄──NapCat(Linux QQ) ◄┘   │
+                                        ▼
+                                     Bilibili（发布动态）
+```
 
-- **Node → TweetToaster**（HTTP JSON，`TWEETTOASTER_URL`）：`POST /api/tweet`（数据）、`POST /api/render` + `GET /api/get_task=<id>`（截图任务轮询）、`GET /api/health`
-- **NoneBot2 → Node**（REST，`X-API-Token` + `X-QQ-User` + `X-QQ-Group`）：`/api/tweets*`（列表/查看/翻译/话题）、`/api/watched-accounts*`（监听）、`/api/tweets/:id/publish|retry`、`/api/notifications`（通知拉取/ack）、`/api/messages/dedupe`（去重）
-- **Node → Bilibili**（`BilibiliClient`，wbi 签名 + BILI Cookie）：`POST api.vc.bilibili.com/api/v1/web/image`（图片上传）、`POST .../dynamic_svr/v1/dynamic_svr/create`（动态发布）
-- **Node 内部**：业务服务（Monitor / 处理管线 / 来源检查 / 翻译 / 发布）→ Repositories → SQLite（WAL）；HTTP API 与业务服务为进程内方法调用
+四个容器服务：`app`（主程序）、`tweettoaster`（Twitter 数据/截图）、`napcat`（Linux QQ 无头 + OneBot）、`nonebot2`（QQ 命令/通知）。
 
-## 当前状态：全部阶段完成（Phase 1-10）
+---
 
-- [x] TypeScript 工程脚手架（ESM，Node.js 22+）
-- [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制（v1 init / v2 notifications）
-- [x] Domain 模型（tweet / translation / topic / publish / workflow / notification）
-- [x] Repository 层
-- [x] Services 接口 + 核心服务实现
-- [x] TweetToaster 客户端（`src/tweettoaster/`）
-- [x] Monitor 监听（`SqliteMonitorService`）
-- [x] 截图与媒体（Phase 4）
-- [x] SOURCE_DELETED 来源检查（Phase 5）
-- [x] HTTP API（Phase 6，NoneBot2 方案）
-- [x] 翻译版本 / 话题 / 工作流（Phase 7）
-- [x] Bilibili 发布（Phase 8）
-- [x] Mock 全链路集成测试（Phase 9）
-- [x] Docker / Health / README / 部署（Phase 10）
-- [x] 单元测试 / 集成测试（160 个用例）
+## 快速开始（Linux，约 10 分钟）
 
-## 快速开始
+### 第 0 步：环境
+
+- Linux 服务器（Ubuntu 20+/Debian 10+/CentOS 9），有公网或可访问网络
+- 已安装 Docker Engine + Docker Compose v2
+
+### 第 1 步：获取代码与配置
 
 ```bash
-npm install
-cp .env.example .env        # 按需修改
-npm run dev                 # tsx 运行 src/index.ts（含 HTTP API）
-npm test                    # vitest 运行测试
-npm run typecheck           # tsc --noEmit
-npm run build               # 编译到 dist/
+git clone <你的仓库地址> twitter-qq-bilibili
+cd twitter-qq-bilibili
+cp .env.example .env
+vim .env   # 填入下面的配置
 ```
 
-## 架构（NoneBot2 方案）
+`.env` 必填项：
+
+| 变量 | 说明 |
+| --- | --- |
+| `QQ_GROUP_IDS` | 机器人要工作的 QQ 群号（逗号分隔，如 `123456789`） |
+| `QQ_ADMIN_IDS` | 管理员 QQ 号（逗号分隔；管理员才能 `/发布` `/重试` `/监听`） |
+| `API_TOKEN` | 内部 API 密钥（`openssl rand -hex 32` 生成，NoneBot2 与主程序共用） |
+| `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` | Bilibili 发布账号 Cookie（获取方法见下方"Bilibili Cookie"） |
+
+### 第 2 步：一键启动
+
+```bash
+./start.sh
+```
+
+脚本会构建并启动全部 4 个服务，然后显示状态：
 
 ```text
-Twitter/X → TweetToaster（数据 + 截图渲染）
-                     ↓
-            Node 主程序（本仓库）
-              Monitor / 截图 / 媒体 / 来源检查 / 翻译 / 话题 / 发布
-              HTTP API（:18080） + SQLite + 通知队列
-                     ↑
-         NoneBot2（Python，连 NapCat）——QQ 消息收发
-             群成员 /翻译、/发布 等命令 → NoneBot2 插件 → HTTP API
+===== 服务状态 =====
+NAME             IMAGE                             STATUS          PORTS
+app              twitter-qq-bilibili-app           Up ...          127.0.0.1:18080->18080/tcp
+tweettoaster     ghcr.io/cn-matsuri/tweettoaster   Up ...          ...
+napcat           mlikiowa/napcat-docker            Up ...          0.0.0.0:3001->3001/tcp, 0.0.0.0:6099->6099/tcp
+nonebot2         twitter-qq-bilibili-nonebot2      Up ...          ...
+===== 健康检查 =====
+✔ 主程序 /api/health: OK ...
 ```
 
-QQ 层（NoneBot2）只做消息收发、命令解析、结果展示；
-业务全部在 Node 的 Services 层，未来 Web 端复用同一套 API 与 Services。
+### 第 3 步：登录机器人 QQ
 
-## NoneBot2 插件接入
+NapCat 里的 QQ 需要登录一次（Linux 下为 WebUI 扫码登录）：
 
-1. 配置 `.env`：`API_PORT`、`API_TOKEN`（与插件一致）、`QQ_GROUP_IDS`、`QQ_ADMIN_IDS`。
-2. 每个请求带请求头：`X-API-Token`、`X-QQ-User`（QQ 号）、`X-QQ-Group`（群号）。
-3. 新推文通知：轮询 `GET /api/notifications`，逐条发送（文本 + `screenshotPath` 图片
-   + `videoThumbnails` 视频封面），成功后 `POST /api/notifications/:id/ack`。
-4. 消息去重：处理命令前调用 `POST /api/messages/dedupe {message_id}`，返回
-   `duplicate: true` 时直接忽略该条（§43）。
-5. 命令与端点的对应见 `src/api/README.md`；`/查看` 的展示文本由 API 返回
-   `format.view`，截图图片读取 `screenshotPath`（Node 与 NoneBot2 共享文件系统，
-   或通过 `GET /api/tweets/:id` 返回的路径自行传输）。
+```bash
+./start.sh status        # 查看 WebUI token（或 docker compose logs napcat | grep -i token）
+```
+
+浏览器打开 `http://<服务器IP>:6099/webui` → 输入 token → 扫码登录机器人 QQ（手机 QQ 确认）。
+
+> 若 OneBot WS（3001）未监听：WebUI → 网络配置 → 新建 WebSocket 服务，端口 `3001`。
+
+### 第 4 步：验证
+
+```bash
+curl http://127.0.0.1:18080/api/health
+# {"ok":true,"data":{"status":"ok","database":"ok","tweettoaster":"ok","qq":"external"}}
+```
+
+在群里发 `/列表`，机器人应回复任务列表。
+
+### 第 5 步：开始使用
+
+群内添加监听账户（管理员）：
+
+```text
+/监听 添加 @某账号
+```
+
+首次添加会自动记录历史推文（不刷屏）；之后新推文 → 截图 → 自动通知进群 → 翻译 → 话题 → 发布。
+
+---
+
+## 配置详解
+
+`.env` 完整变量（其余可留默认）：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `NODE_ENV` | `production` | 运行环境 |
+| `DATABASE_PATH` | `/app/data/app.db` | SQLite 路径（容器内） |
+| `CACHE_ROOT` | `/app/cache` | 媒体缓存目录（容器内） |
+| `TWEETTOASTER_URL` | `http://tweettoaster:8082` | TweetToaster 地址（compose 内网） |
+| `TWITTER_POLL_INTERVAL` | `60` | 监听轮询间隔（秒，每账户 ±10s jitter） |
+| `SOURCE_CHECK_INTERVAL` | `1800` | 原推删除检查间隔（秒） |
+| `BOOTSTRAP_MODE` | `latest_only` | 首次监听只记录不通知 |
+| `QQ_GROUP_IDS` | 空 | 允许的群号，逗号分隔（必填） |
+| `QQ_ADMIN_IDS` | 空 | 管理员 QQ，逗号分隔（必填） |
+| `BILI_*` | 空 | Bilibili 发布账号 Cookie（必填，见下） |
+| `PUBLISH_MODE` | `manual` | 发布模式（仅 manual） |
+| `API_PORT` | `18080` | 主程序 HTTP API 端口 |
+| `API_TOKEN` | 空 | 内部 API 密钥（必填） |
+
+### Bilibili Cookie 获取
+
+1. 浏览器登录 `https://www.bilibili.com`（用于发布的账号）
+2. `F12` → `Application` → `Cookies` → `https://www.bilibili.com`
+3. 复制 `SESSDATA`（URL 编码形式，不要点"显示已解码"）、`bili_jct`、`DedeUserID` 填入 `.env`
+
+验证：`curl -s 'https://api.bilibili.com/x/web-interface/nav' -H 'Cookie: SESSDATA=...; bili_jct=...; DedeUserID=...'` 返回 `"isLogin":true` 即有效。
+
+---
+
+## 使用（QQ 群命令）
+
+| 命令 | 权限 | 说明 |
+| --- | --- | --- |
+| `/监听` | 管理员 | 查看 / `添加 @账号` / `开启` / `关闭` / `删除` |
+| `/列表 [状态] [页码]` | 成员 | 任务列表（每条含内容摘要）；状态：待翻译/已翻译/已发布/失败/全部 |
+| `/查看 152,155` | 成员 | 推文状态 + 原推链接 + 截图 |
+| `/翻译 152` + 正文 | 成员 | 提交最终翻译（保留 emoji/换行，版本递增） |
+| `/话题 152 别名` | 成员 | 设置话题；`无` 取消（话题需管理员先在库中配置） |
+| `/发布 152 [话题]` | 管理员 | 发布到 Bilibili（翻译 + 原图 + 话题） |
+| `/重试 152` | 管理员 | 发布失败后重试 |
+
+新推文自动通知：进群推文截图（视频推文含封面与"包含视频"提示），**不含原文正文**。
+
+---
+
+## 运维
+
+```bash
+./start.sh status     # 查看 4 个服务状态 + 健康检查
+./start.sh logs       # 跟随全部日志（可加服务名：./start.sh logs app）
+./start.sh stop       # 停止（保留数据）
+./start.sh restart    # 重启
+./start.sh down       # 停止并删除容器（数据卷保留）
+```
+
+- **备份**：数据库在 volume `app-data`（`/app/data/app.db`）。备份：`docker compose exec app sh -c 'cd /app/data && sqlite3 app.db ".backup /backup.db"'` 后拷贝。
+- **缓存**：volume `app-cache`，可安全清空。
+- **Cookie 失效**：`/发布` 返回 `BILIBILI_AUTH` → 更新 `.env` 的 `BILI_*` → `./start.sh restart` → 群内 `/重试`。
+- **更新**：`git pull && ./start.sh`。
+- **Bilibili 必须直连**（程序已处理，勿为 B 站配代理）；Twitter 媒体走 `HTTPS_PROXY`（如需代理，在 `.env` 加 `HTTPS_PROXY=http://...`）。
+
+---
 
 ## 目录
 
 ```text
-src/
-  config/       环境配置
-  db/           SQLite + migrations
-  domain/       领域模型与状态机
-  repositories/ 数据访问
-  services/     Application Services（QQ 与未来 Web 共用）
-  qq/           QQ 权限与展示格式化（纯函数，NoneBot2 参考实现）
-  tweettoaster/ TweetToaster 客户端与标准化
-  media/        安全下载
-  api/          HTTP API 服务
-  bilibili/     后续阶段：Bilibili 客户端
-tests/          单元 / 集成测试
-data/           SQLite 文件（app.db）
-cache/          截图 / 原始图片 / 视频封面缓存
+src/           主程序（TypeScript）
+  config/ db/ domain/ repositories/ services/ tweettoaster/ media/ api/ bilibili/
+nonebot-plugin/ NoneBot2 插件（容器化）
+docs/          部署文档与架构图
+data/ cache/   运行时数据（Docker volume）
+docker-compose.yml  全栈编排
+start.sh       一键启动/状态/日志/停止
 ```
-
-## 核心约定
-
-- 本地编号（#152）与 Twitter Snowflake ID 分离；`x_tweet_id` 数据库唯一。
-- `workflow_status` 与 `source_status` 两个维度分离（可"已发布但原推已删除"）。
-- 原推删除由单推检查明确确认，不因"不在 timeline"判定。
-- QQ 新推文通知与 `/查看` 都不发送原文正文，内容统一由推文截图展示。
-- 翻译只做 `\r\n → \n` 规范化，保留 emoji / 换行 / 空行；保留版本历史。
-- 视频不下载本体、不上传 Bilibili；Bilibili 只上传 `photo`。
-- 同一推文只能成功发布一次（数据库级唯一约束保证幂等）。
-- 所有 secret 来自环境变量，禁止进入 Git / 日志。
-
-## 部署（Docker Compose，规格 §58 / §62 Phase 10）
-
-```bash
-# 1. 配置（与仓库 .env.example 同名变量）
-cp .env.example .env
-#    填入：QQ_GROUP_IDS / QQ_ADMIN_IDS / BILI_SESSDATA / BILI_JCT / BILI_DEDEUSERID / API_TOKEN
-
-# 2. 启动
-docker compose up -d --build
-
-# 3. 健康检查
-curl http://127.0.0.1:18080/api/health
-```
-
-- 服务：`app`（本主程序）+ `tweettoaster`（官方镜像，数据 + 截图渲染）。
-- QQ / NoneBot2 / NapCat 按部署环境独立运行，不在容器内（规格 §58）。
-- 端口：API `127.0.0.1:18080`，TweetToaster `127.0.0.1:8082`（默认只监听本机）。
-
-## 运维要点
-
-- **数据库**：`data/app.db`（容器内 `/app/data/app.db`，volume `app-data`）。备份 = 拷贝该文件（建议停机或使用 SQLite backup；WAL 模式下同时保留 `app.db-wal`）。
-- **缓存**：`cache/`（容器内 `/app/cache`，volume `app-cache`）：`screenshots/` 推文截图、`twitter-photos/` 原始图片、`video-thumbnails/` 视频封面。可安全清空（会按需重建）。
-- **Bilibili Cookie 失效**（§54-18）：发布时返回 401 / `BILIBILI_AUTH`，推文进入 `PUBLISH_FAILED`；更新 `.env` 中的 `BILI_SESSDATA/BILI_JCT/BILI_DEDEUSERID` 后 `docker compose up -d` 重启，再 `/重试`。
-- **SOURCE_DELETED 语义**（§12/§13）：只有单推检查明确 404 才标记"原推已删除"；本地翻译、话题、发布记录全部保留，不影响已发布动态，管理员仍可决定是否发布。
-- **视频处理规则**（§18/§20/§22）：视频推文正常进 QQ 工作流，只下载默认封面；视频与封面都不上传 Bilibili，视频-only 推文发布为纯文本动态。
-- **Secrets**：所有 Cookie / token 只来自环境变量，禁止写入 Git、源码、日志。
-
-## 开发阶段
-
-见规格 §62：P1 骨架 → P2 TweetToaster → P3 Monitor → P4 截图/媒体 →
-P5 来源检查 → P6 QQ（NoneBot2 方案交付 HTTP API）→ P7 翻译/话题/工作流 →
-P8 Bilibili → P9 集成测试 → P10 Docker/部署。**全部阶段已完成。**
