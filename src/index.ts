@@ -27,9 +27,14 @@ function main(): void {
   services.monitor.start();
   console.log('[boot] monitor started');
 
+  // 来源检查循环（SOURCE_CHECK_INTERVAL，规格 §12）
+  services.sourceValidation.start();
+  console.log('[boot] source validation started');
+
   const shutdown = (signal: string): void => {
     console.log(`[boot] received ${signal}, closing...`);
     services.monitor.stop();
+    services.sourceValidation.stop();
     database.close();
     process.exit(0);
   };

@@ -20,6 +20,7 @@ import {
   type MonitorService,
 } from './monitor-service.js';
 import {
+  DefaultSourceValidationService,
   StubSourceValidationService,
   type SourceValidationService,
 } from './source-validation-service.js';
@@ -99,6 +100,13 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     screenshot,
     media,
   });
+  const sourceValidation: SourceValidationService = deps
+    ? new DefaultSourceValidationService({
+        tweets: repos.tweets,
+        tweetToaster: deps.tweetToaster,
+        checkIntervalMs: deps.config.sourceCheckInterval * 1000,
+      })
+    : new StubSourceValidationService();
 
   const monitor: MonitorService = deps
     ? new SqliteMonitorService({
@@ -118,7 +126,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     publish: new StubPublishService(),
     workflow,
     monitor,
-    sourceValidation: new StubSourceValidationService(),
+    sourceValidation,
     screenshot,
     media,
     newTweetProcessor,

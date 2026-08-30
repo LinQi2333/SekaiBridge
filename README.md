@@ -2,7 +2,7 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 4（截图与媒体缓存）
+## 当前状态：Phase 5（SOURCE_DELETED 来源检查）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
 - [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制
@@ -12,12 +12,12 @@
 - [x] TweetToaster 客户端（`src/tweettoaster/`）
 - [x] Monitor 监听（`SqliteMonitorService`）
 - [x] 截图与媒体（Phase 4）
-  - `DefaultScreenshotService`：TweetToaster render（original-only）→ 下载到 `cache/screenshots/<tweet-id>.png`
-  - `DefaultMediaService`：photo → `cache/twitter-photos/`，视频封面 → `cache/video-thumbnails/`（三种资产分离，§47）
-  - 视频只下载默认封面，不下载视频本体（§18/§20）
-  - `safeDownload` 安全下载：HTTP/HTTPS 白名单、超时、大小上限、Content-Type 白名单（§48）
-  - `DefaultNewTweetProcessor`：新推文 → 截图 → `SCREENSHOT_READY` → 媒体缓存（失败不阻塞）
-- [x] 单元测试 / 集成测试（98 个用例）
+- [x] SOURCE_DELETED 来源检查（Phase 5，`DefaultSourceValidationService`）
+  - 只信单推明确 404 / tombstone / not found，不因"不在 timeline"判定（§12）
+  - 按 `SOURCE_CHECK_INTERVAL` 周期检查处理中的推文；`/查看` 可手动刷新
+  - 网络错误不标记删除；删除后本地数据全保留、状态双维度并存（§13）
+  - 已通过 §50 Case A/B/C/D 测试
+- [x] 单元测试 / 集成测试（107 个用例）
 
 ## 快速开始
 
