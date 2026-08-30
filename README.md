@@ -2,14 +2,20 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 1（项目骨架）
+## 当前状态：Phase 2（TweetToaster Client）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
 - [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制
 - [x] Domain 模型（tweet / translation / topic / publish / workflow）
 - [x] Repository 层
 - [x] Services 接口 + 核心服务实现
-- [x] 单元测试 / 集成测试
+- [x] TweetToaster 客户端（`src/tweettoaster/`）
+  - `POST /api/tweet`：单推 / 主页 / timeline 数据获取
+  - `POST /api/render` + `/api/auto`：任务提交与轮询，返回截图 URL
+  - `GET /api/get_task=<id>`、`GET /api/health`
+  - 媒体标准化：photo / video / gif，video url 即默认封面（TweetToaster 行为）
+  - 404 / tombstone → `TweetNotFoundError`（Phase 5 SOURCE_DELETED 信号）
+- [x] 单元测试 / 集成测试（69 个用例）
 
 ## 快速开始
 
