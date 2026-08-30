@@ -3,6 +3,8 @@ import { WorkflowStatus } from '../../../src/domain/workflow.js';
 import type { Tweet } from '../../../src/domain/tweet.js';
 import {
   formatNewTweetNotification,
+  formatTopicList,
+  formatTranslationSaved,
   formatTweetListLine,
   formatTweetView,
   sourceLabel,
@@ -91,5 +93,26 @@ describe('QQ 展示格式化（规格 §42 / §27 / §51）', () => {
     expect(sourceLabel('SOURCE_DELETED')).toBe('⚠️ 原推已删除');
     expect(toDisplayTime('2026-08-30T02:15:00.000Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(toDisplayTime(null)).toBe('未知');
+  });
+
+  it('翻译保存回复（规格 §30）', () => {
+    const text = formatTranslationSaved(152, 3);
+    expect(text).toContain('推文 #152 翻译已保存。');
+    expect(text).toContain('当前版本：v3');
+    expect(text).toContain('状态：已翻译，等待发布。');
+    expect(text).toContain('/话题 152 hololive');
+    expect(text).toContain('/发布 152');
+  });
+
+  it('话题列表（规格 §32）', () => {
+    const text = formatTopicList([
+      { alias: 'default', name: '夏色祭' },
+      { alias: 'hololive', name: 'hololive' },
+      { alias: 'live', name: 'VTuber直播' },
+    ]);
+    expect(text).toContain('可用话题：');
+    expect(text).toContain('default    夏色祭');
+    expect(text).toContain('hololive   hololive');
+    expect(text).toContain('live       VTuber直播');
   });
 });

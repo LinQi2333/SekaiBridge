@@ -88,3 +88,27 @@ export function formatTweetListLine(tweet: Tweet): string {
   const deleted = tweet.sourceStatus === SourceStatus.SOURCE_DELETED ? '原推已删除 / ' : '';
   return `#${tweet.id} @${tweet.authorScreenName}   ${deleted}${workflowLabel(tweet.workflowStatus)}`;
 }
+
+/** 翻译提交后的 QQ 回复（规格 §30）。 */
+export function formatTranslationSaved(tweetId: number, version: number): string {
+  return [
+    `推文 #${tweetId} 翻译已保存。`,
+    '',
+    `当前版本：v${version}`,
+    '状态：已翻译，等待发布。',
+    '',
+    '可继续：',
+    `/话题 ${tweetId} hololive`,
+    `/发布 ${tweetId}`,
+  ].join('\n');
+}
+
+/** /话题 列表输出（规格 §32）。 */
+export function formatTopicList(topics: { alias: string; name: string }[]): string {
+  if (topics.length === 0) {
+    return '可用话题：\n\n（暂无话题，请联系管理员添加）';
+  }
+  const width = Math.max(...topics.map((t) => t.alias.length)) + 3;
+  const lines = topics.map((t) => `${t.alias.padEnd(width)}${t.name}`);
+  return `可用话题：\n\n${lines.join('\n')}`;
+}
