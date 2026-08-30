@@ -13,6 +13,9 @@ export interface AppConfig {
   /** SQLite 数据库文件路径（相对路径基于进程工作目录解析）。 */
   databasePath: string;
 
+  /** 媒体缓存根目录（截图 / 原始图片 / 视频封面，规格 §47）。 */
+  cacheRoot: string;
+
   /** TweetToaster 独立服务地址。 */
   tweettoasterUrl: string;
 
@@ -91,6 +94,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
   return {
     nodeEnv,
     databasePath: path.resolve(env.DATABASE_PATH ?? './data/app.db'),
+    cacheRoot: path.resolve(env.CACHE_ROOT ?? './cache'),
     tweettoasterUrl: env.TWEETTOASTER_URL ?? 'http://tweettoaster:8082',
     twitterPollInterval: parseIntStrict(env.TWITTER_POLL_INTERVAL, 60, 'TWITTER_POLL_INTERVAL'),
     sourceCheckInterval: parseIntStrict(env.SOURCE_CHECK_INTERVAL, 1800, 'SOURCE_CHECK_INTERVAL'),

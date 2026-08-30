@@ -2,7 +2,7 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 3（Monitor 监听）
+## 当前状态：Phase 4（截图与媒体缓存）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
 - [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制
@@ -11,11 +11,13 @@
 - [x] Services 接口 + 核心服务实现
 - [x] TweetToaster 客户端（`src/tweettoaster/`）
 - [x] Monitor 监听（`SqliteMonitorService`）
-  - 0 / 1 / N 个账户轮询，每账户 ±10s jitter（规格 §6）
-  - bootstrap `latest_only`：首次读取只入库、标记完成、不发送通知（规格 §7）
-  - 增量检测：x_tweet_id 数据库去重 + `onNewTweets` 回调（Phase 6 接 QQ 通知）
-  - 错误韧性：单账户失败不影响其他账户
-- [x] 单元测试 / 集成测试（79 个用例）
+- [x] 截图与媒体（Phase 4）
+  - `DefaultScreenshotService`：TweetToaster render（original-only）→ 下载到 `cache/screenshots/<tweet-id>.png`
+  - `DefaultMediaService`：photo → `cache/twitter-photos/`，视频封面 → `cache/video-thumbnails/`（三种资产分离，§47）
+  - 视频只下载默认封面，不下载视频本体（§18/§20）
+  - `safeDownload` 安全下载：HTTP/HTTPS 白名单、超时、大小上限、Content-Type 白名单（§48）
+  - `DefaultNewTweetProcessor`：新推文 → 截图 → `SCREENSHOT_READY` → 媒体缓存（失败不阻塞）
+- [x] 单元测试 / 集成测试（98 个用例）
 
 ## 快速开始
 

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { AppConfig } from '../config/config.js';
 import { TweetRepository } from '../repositories/tweet-repository.js';
@@ -22,8 +23,16 @@ import {
   StubSourceValidationService,
   type SourceValidationService,
 } from './source-validation-service.js';
-import { StubScreenshotService, type ScreenshotService } from './screenshot-service.js';
-import { StubMediaService, type MediaService } from './media-service.js';
+import {
+  DefaultScreenshotService,
+  StubScreenshotService,
+  type ScreenshotService,
+} from './screenshot-service.js';
+import { DefaultMediaService, StubMediaService, type MediaService } from './media-service.js';
+import {
+  DefaultNewTweetProcessor,
+  type NewTweetProcessor,
+} from './tweet-processor.js';
 import { StubPublishService, type PublishService } from './publish-service.js';
 
 /**
@@ -41,6 +50,7 @@ export interface AppServices {
   sourceValidation: SourceValidationService;
   screenshot: ScreenshotService;
   media: MediaService;
+  newTweetProcessor: NewTweetProcessor;
 }
 
 export interface Repositories {
@@ -63,25 +73,43 @@ export function createRepositories(db: Database.Database): Repositories {
   };
 }
 
-/** 创建真实 Monitor 等外部依赖所需的环境（不传则使用 stub）。 */
+/** 创建真实外部依赖所需的环境（不传则使用 stub）。 */
 export interface ServiceDeps {
   config: AppConfig;
   tweetToaster: TweetToasterClient;
-  /** 增量新推文回调（Phase 6 在此发送 QQ 通知）。 */
+  /** 增量新推文回调（Phase 6 在此发送 QQ 通知）；不传则默认走 newTweetProcessor。 */
   onNewTweets?: (tweets: import('../domain/tweet.js').Tweet[]) => void;
 }
 
 export function createServices(repos: Repositories, deps?: ServiceDeps): AppServices {
   const workflow = new SqliteWorkflowService(repos.tweets);
+  const screenshot: ScreenshotService = deps
+    ? new DefaultScreenshotService({
+        tweets: repos.tweets,
+        tweetToaster: deps.tweetToaster,
+        cacheDir: path.join(deps.config.cacheRoot, 'screenshots'),
+      })
+    : new StubScreenshotService();
+  const media: MediaService = deps
+    ? new DefaultMediaService({ tweets: repos.tweets, cacheRoot: deps.config.cacheRoot })
+    : new StubMediaService();
+  const newTweetProcessor = new DefaultNewTweetProcessor({
+    tweets: repos.tweets,
+    workflow,
+    screenshot,
+    media,
+  });
+
   const monitor: MonitorService = deps
     ? new SqliteMonitorService({
         watch: repos.watch,
         tweets: repos.tweets,
         tweetToaster: deps.tweetToaster,
         pollIntervalMs: deps.config.twitterPollInterval * 1000,
-        onNewTweets: deps.onNewTweets,
+        onNewTweets: deps.onNewTweets ?? ((tweets) => void newTweetProcessor.process(tweets)),
       })
     : new StubMonitorService();
+
   return {
     watch: new SqliteWatchService(repos.watch),
     tweetQuery: new SqliteTweetQueryService(repos.tweets),
@@ -91,12 +119,14 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     workflow,
     monitor,
     sourceValidation: new StubSourceValidationService(),
-    screenshot: new StubScreenshotService(),
-    media: new StubMediaService(),
+    screenshot,
+    media,
+    newTweetProcessor,
   };
 }
 
 export { SqliteMonitorService } from './monitor-service.js';
+export { DefaultNewTweetProcessor } from './tweet-processor.js';
 export type {
   WatchService,
   TranslationService,
@@ -105,6 +135,7 @@ export type {
   WorkflowService,
   MonitorService,
   MonitorPollResult,
+  NewTweetProcessor,
   SourceValidationService,
   ScreenshotService,
   MediaService,
