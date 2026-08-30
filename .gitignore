@@ -1,0 +1,45 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# runtime data
+data/*
+cache/*
+!cache/.gitkeep
+!cache/screenshots/
+!cache/twitter-photos/
+!cache/video-thumbnails/
+cache/screenshots/*
+cache/twitter-photos/*
+cache/video-thumbnails/*
+!cache/screenshots/.gitkeep
+!cache/twitter-photos/.gitkeep
+!cache/video-thumbnails/.gitkeep
+
+# keep empty directories tracked
+!data/.gitkeep
+
+# env / secrets
+.env
+.env.local
+*.local
+
+# logs
+logs/
+*.log
+
+# tests / coverage
+coverage/
+
+# sqlite artifacts (data/ is already ignored, keep for safety)
+*.db
+*.db-wal
+*.db-shm
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
