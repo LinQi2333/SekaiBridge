@@ -39,27 +39,41 @@ Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统（MVP）
 
 ## 2. 架构总览
 
-![系统架构](architecture.svg)
+![系统架构（接口协作）](architecture.svg)
 
 ```mermaid
-flowchart TD
-    TW[Twitter / X] -->|被监听账户推文| TT[TweetToaster<br/>FxTwitter/FxEmbed 数据 + Chromium 截图]
-    TT -->|推文数据 / 截图 URL| NODE
+flowchart LR
+    TW[Twitter / X] -->|公开推文| TT[TweetToaster :8082<br/>POST /api/tweet · /api/render<br/>GET /api/get_task=&lt;id&gt; · /api/health]
+    TT -->|HTTP JSON| CL[Node · TweetToasterClient<br/>getTimeline / getTweet / render]
 
-    QQ[QQ 群 · 翻译工作台] -->|群消息| NB[NoneBot2 + NapCat<br/>消息收发 / 命令解析]
-    NB -->|HTTP 调用 X-API-Token| API[HTTP API :18080]
+    QQ[QQ 群] <-->|OneBot 11 WS| NB[NoneBot2 + NapCat<br/>命令解析 / 图片发送]
+    NB -->|REST + X-API-Token / X-QQ-User / X-QQ-Group| API[Node · HTTP API :18080]
 
-    subgraph NODE[Node 主程序（本仓库）]
-        API --> SVC[Application Services<br/>翻译 / 话题 / 发布 / 查询]
-        SVC --> SQL[(SQLite<br/>data/app.db)]
-        SVC --> CACHE[(媒体缓存 cache/)]
-        MON[Monitor 监听<br/>轮询 / bootstrap / 去重] --> SVC
-        PP[新推文处理管线<br/>截图 / 媒体缓存 / QQ 通知] --> SVC
-        SV[来源检查<br/>SOURCE_DELETED] --> SVC
+    subgraph NODE[Node 主程序]
+        API -->|services.* 方法调用| SVC[Application Services<br/>翻译 / 话题 / 发布 / 查询 / 工作流]
+        CL --> SVC
+        MON[Monitor 监听] --> SVC
+        SV[来源检查] --> SVC
+        SVC -->|SQL / 事务| SQL[(SQLite data/app.db<br/>WAL · 7 张表)]
+        SVC -->|uploadImage / publishDynamic| BL[Node · BilibiliClient<br/>wbi 签名 + Cookie]
     end
 
-    SVC -->|图片上传 / 动态发布| BILI[Bilibili<br/>BILI Cookie]
+    BL -->|POST api.vc.bilibili.com<br/>/api/v1/web/image · /dynamic_svr/...| BILI[Bilibili]
 ```
+
+**接口协作要点（各模块间的 API 关系）**
+
+| 调用方向 | 协议 / 接口 | 关键参数与鉴权 |
+| --- | --- | --- |
+| Node → TweetToaster | `POST /api/tweet` | body `{url}`（单推链接 / @用户名 / 主页），返回标准化推文 JSON；404 → `TweetNotFoundError`（SOURCE_DELETED 信号） |
+| Node → TweetToaster | `POST /api/render` | body `{tweet, template:"", logo:"none", noLikes:true, selection:[{id}]}` → `{task_id}`；轮询 `GET /api/get_task=<id>` 至 `SUCCESS`，取 `result` 拼 `/cache/<result>.png` |
+| Node → TweetToaster | `GET /api/health` | 健康检查，聚合进 `/api/health` |
+| NoneBot2 → Node | REST `GET/POST/PATCH/DELETE /api/...` | 头：`X-API-Token`（= `API_TOKEN`）、`X-QQ-User`、`X-QQ-Group`；权限按 §41（管理员 / 成员 / 群白名单） |
+| NoneBot2 → Node | `GET /api/notifications` + `POST /api/notifications/:id/ack` | token 鉴权；返回待发送通知（文本 + 截图路径 + 视频封面路径） |
+| NoneBot2 → Node | `POST /api/messages/dedupe` | body `{message_id}` → `{duplicate:bool}`（§43 消息去重） |
+| Node → Bilibili | `POST api.vc.bilibili.com/api/v1/web/image` | multipart `file` + wbi 签名（`w_rid`/`wts`）+ Cookie（`SESSDATA`/`bili_jct`/`DedeUserID`）→ `data.image_url` |
+| Node → Bilibili | `POST api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create` | form `type=4, biz_id=pics[], content, topic_id?, csrf=bili_jct` + wbi 签名 → `data.dynamic_id` |
+| Node 内部 | 服务 → 客户端 / Repositories | 进程内 TS 方法调用；Repositories → SQLite（WAL、`foreign_keys=ON`） |
 
 | 组件 | 职责 | 部署方式 |
 | --- | --- | --- |

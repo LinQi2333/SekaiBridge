@@ -4,9 +4,16 @@
 > **部署请看 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**（环境、配置、Cookie 获取、Docker、NoneBot2 插件示例、运维与 FAQ）。
 > 架构图：[`docs/architecture.svg`](docs/architecture.svg)
 
-## 架构总览
+## 架构总览（接口协作图）
 
-![系统架构](docs/architecture.svg)
+![系统架构（接口协作）](docs/architecture.svg)
+
+关键接口（详见图中标注与 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)）：
+
+- **Node → TweetToaster**（HTTP JSON，`TWEETTOASTER_URL`）：`POST /api/tweet`（数据）、`POST /api/render` + `GET /api/get_task=<id>`（截图任务轮询）、`GET /api/health`
+- **NoneBot2 → Node**（REST，`X-API-Token` + `X-QQ-User` + `X-QQ-Group`）：`/api/tweets*`（列表/查看/翻译/话题）、`/api/watched-accounts*`（监听）、`/api/tweets/:id/publish|retry`、`/api/notifications`（通知拉取/ack）、`/api/messages/dedupe`（去重）
+- **Node → Bilibili**（`BilibiliClient`，wbi 签名 + BILI Cookie）：`POST api.vc.bilibili.com/api/v1/web/image`（图片上传）、`POST .../dynamic_svr/v1/dynamic_svr/create`（动态发布）
+- **Node 内部**：业务服务（Monitor / 处理管线 / 来源检查 / 翻译 / 发布）→ Repositories → SQLite（WAL）；HTTP API 与业务服务为进程内方法调用
 
 ## 当前状态：全部阶段完成（Phase 1-10）
 
