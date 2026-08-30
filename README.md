@@ -1,6 +1,12 @@
 # Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
+> **部署请看 [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)**（环境、配置、Cookie 获取、Docker、NoneBot2 插件示例、运维与 FAQ）。
+> 架构图：[`docs/architecture.svg`](docs/architecture.svg)
+
+## 架构总览
+
+![系统架构](docs/architecture.svg)
 
 ## 当前状态：全部阶段完成（Phase 1-10）
 
