@@ -2,7 +2,7 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 8（Bilibili 发布）
+## 当前状态：全部阶段完成（Phase 1-10）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
 - [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制（v1 init / v2 notifications）
@@ -14,14 +14,11 @@
 - [x] 截图与媒体（Phase 4）
 - [x] SOURCE_DELETED 来源检查（Phase 5）
 - [x] HTTP API（Phase 6，NoneBot2 方案）
-- [x] 翻译版本 / 话题 / 工作流（Phase 7，含 §30 回复与 §32 话题列表展示）
-- [x] Bilibili 发布（Phase 8，`DefaultPublishService` + `src/bilibili/`）
-  - wbi 签名客户端（`BilibiliClient`）：图片上传、动态发布、Cookie 认证
-  - 登录失效识别（§54-18）：code -101/-111/-352/-412 → `BilibiliAuthError`
-  - 只上传 photo（§21/§53），视频与封面永不进入 `pics[]`；视频-only 发纯文本动态（§22）
-  - 幂等发布（§38）：已 SUCCESS 不重复调用 Bilibili API；失败可重试（§39）
-  - 发布内容 = 最终翻译文本 + Twitter 原始图片 + 可选话题（§34）
-- [x] 单元测试 / 集成测试（158 个用例）
+- [x] 翻译版本 / 话题 / 工作流（Phase 7）
+- [x] Bilibili 发布（Phase 8）
+- [x] Mock 全链路集成测试（Phase 9）
+- [x] Docker / Health / README / 部署（Phase 10）
+- [x] 单元测试 / 集成测试（160 个用例）
 
 ## 快速开始
 
@@ -92,8 +89,35 @@ cache/          截图 / 原始图片 / 视频封面缓存
 - 同一推文只能成功发布一次（数据库级唯一约束保证幂等）。
 - 所有 secret 来自环境变量，禁止进入 Git / 日志。
 
+## 部署（Docker Compose，规格 §58 / §62 Phase 10）
+
+```bash
+# 1. 配置（与仓库 .env.example 同名变量）
+cp .env.example .env
+#    填入：QQ_GROUP_IDS / QQ_ADMIN_IDS / BILI_SESSDATA / BILI_JCT / BILI_DEDEUSERID / API_TOKEN
+
+# 2. 启动
+docker compose up -d --build
+
+# 3. 健康检查
+curl http://127.0.0.1:18080/api/health
+```
+
+- 服务：`app`（本主程序）+ `tweettoaster`（官方镜像，数据 + 截图渲染）。
+- QQ / NoneBot2 / NapCat 按部署环境独立运行，不在容器内（规格 §58）。
+- 端口：API `127.0.0.1:18080`，TweetToaster `127.0.0.1:8082`（默认只监听本机）。
+
+## 运维要点
+
+- **数据库**：`data/app.db`（容器内 `/app/data/app.db`，volume `app-data`）。备份 = 拷贝该文件（建议停机或使用 SQLite backup；WAL 模式下同时保留 `app.db-wal`）。
+- **缓存**：`cache/`（容器内 `/app/cache`，volume `app-cache`）：`screenshots/` 推文截图、`twitter-photos/` 原始图片、`video-thumbnails/` 视频封面。可安全清空（会按需重建）。
+- **Bilibili Cookie 失效**（§54-18）：发布时返回 401 / `BILIBILI_AUTH`，推文进入 `PUBLISH_FAILED`；更新 `.env` 中的 `BILI_SESSDATA/BILI_JCT/BILI_DEDEUSERID` 后 `docker compose up -d` 重启，再 `/重试`。
+- **SOURCE_DELETED 语义**（§12/§13）：只有单推检查明确 404 才标记"原推已删除"；本地翻译、话题、发布记录全部保留，不影响已发布动态，管理员仍可决定是否发布。
+- **视频处理规则**（§18/§20/§22）：视频推文正常进 QQ 工作流，只下载默认封面；视频与封面都不上传 Bilibili，视频-only 推文发布为纯文本动态。
+- **Secrets**：所有 Cookie / token 只来自环境变量，禁止写入 Git、源码、日志。
+
 ## 开发阶段
 
 见规格 §62：P1 骨架 → P2 TweetToaster → P3 Monitor → P4 截图/媒体 →
-P5 来源检查 → P6 QQ（本阶段按 NoneBot2 方案交付 HTTP API）→
-P7 翻译/话题/工作流 → P8 Bilibili → P9 集成测试 → P10 Docker/部署。
+P5 来源检查 → P6 QQ（NoneBot2 方案交付 HTTP API）→ P7 翻译/话题/工作流 →
+P8 Bilibili → P9 集成测试 → P10 Docker/部署。**全部阶段已完成。**

@@ -1,0 +1,54 @@
+# Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统（规格 §58）
+#
+# 服务：
+#   app         主程序（监听 / 截图 / 来源检查 / HTTP API / 发布）
+#   tweettoaster TweetToaster（Twitter 数据 + 截图渲染，官方镜像）
+#
+# QQ / NoneBot2 / NapCat 按部署环境独立运行，不塞进本 Compose（规格 §58）。
+#
+# 用法：
+#   docker compose up -d
+# 敏感配置通过 .env 传入（与仓库内 .env.example 同名变量）：
+#   BILI_SESSDATA / BILI_JCT / BILI_DEDEUSERID / QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
+
+services:
+  tweettoaster:
+    image: ghcr.io/cn-matsuri/tweettoaster:latest
+    restart: unless-stopped
+    shm_size: 512m
+    volumes:
+      - tweettoaster-cache:/app/Matsuri_translation/frontend/cache
+    ports:
+      - "127.0.0.1:8082:8082"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - tweettoaster
+    environment:
+      NODE_ENV: production
+      DATABASE_PATH: /app/data/app.db
+      CACHE_ROOT: /app/cache
+      TWEETTOASTER_URL: http://tweettoaster:8082
+      TWITTER_POLL_INTERVAL: ${TWITTER_POLL_INTERVAL:-60}
+      SOURCE_CHECK_INTERVAL: ${SOURCE_CHECK_INTERVAL:-1800}
+      BOOTSTRAP_MODE: latest_only
+      QQ_GROUP_IDS: ${QQ_GROUP_IDS:-}
+      QQ_ADMIN_IDS: ${QQ_ADMIN_IDS:-}
+      BILI_SESSDATA: ${BILI_SESSDATA:-}
+      BILI_JCT: ${BILI_JCT:-}
+      BILI_DEDEUSERID: ${BILI_DEDEUSERID:-}
+      PUBLISH_MODE: manual
+      API_PORT: 18080
+      API_TOKEN: ${API_TOKEN:-}
+    volumes:
+      - app-data:/app/data
+      - app-cache:/app/cache
+    ports:
+      - "127.0.0.1:18080:18080"
+
+volumes:
+  tweettoaster-cache:
+  app-data:
+  app-cache:
