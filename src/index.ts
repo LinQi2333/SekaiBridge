@@ -23,13 +23,13 @@ function main(): void {
   // 支持 HTTPS_PROXY 的 fetch（国内环境访问 Twitter CDN 需要代理）
   const fetchImpl = createProxyFetch();
   const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl, fetchImpl });
+  // Bilibili 是国内服务，必须直连（走代理会因出口 IP 不一致触发 CSRF/风控）
   const biliClient = new BilibiliClient({
     cookie: {
       sessdata: config.biliSessdata,
       jct: config.biliJct,
       dedeuserid: config.biliDedeuserid,
     },
-    fetchImpl,
   });
   const services = createServices(repos, {
     config,

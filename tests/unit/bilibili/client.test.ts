@@ -42,7 +42,7 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     let uploadInit: RequestInit | undefined;
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/web-interface/nav': () => jsonResponse(NAV_OK),
-      'https://api.vc.bilibili.com/api/v1/web/image': (init) => {
+      'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': (init) => {
         uploadInit = init;
         return jsonResponse({ code: 0, message: '0', data: { image_url: 'https://i0.hdslb.com/bfs/article/x.jpg' } });
       },
@@ -52,30 +52,29 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     const url = await client.uploadImage(Buffer.from([1, 2, 3]), 'a.jpg');
     expect(url).toBe('https://i0.hdslb.com/bfs/article/x.jpg');
 
-    // 上传请求带 cookie 与 multipart file
+    // 上传请求带 cookie 与 multipart file_up
     const headers = uploadInit?.headers as Record<string, string> | undefined;
     expect(headers?.cookie).toContain('SESSDATA=s');
     expect(headers?.cookie).toContain('bili_jct=j');
     expect(headers?.cookie).toContain('DedeUserID=1');
     const body = uploadInit?.body;
     expect(body).toBeInstanceOf(FormData);
-    const file = (body as FormData).get('file');
+    const file = (body as FormData).get('file_up');
     expect((file as File | null)?.name).toBe('a.jpg');
-    // wbi 签名参数存在
-    expect((body as FormData).has('w_rid')).toBe(true);
-    expect((body as FormData).has('wts')).toBe(true);
+    expect((body as FormData).get('category')).toBe('daily');
+    expect((body as FormData).get('csrf')).toBe('j');
   });
 
-  it('wbi key 缓存：多次请求只拉取一次 nav', async () => {
+  it('wbi key 缓存：多次动态发布只拉取一次 nav', async () => {
     const nav = vi.fn(() => jsonResponse(NAV_OK));
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/web-interface/nav': nav,
-      'https://api.vc.bilibili.com/api/v1/web/image': () =>
-        jsonResponse({ code: 0, message: '0', data: { image_url: 'u' } }),
+      'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create': () =>
+        jsonResponse({ code: 0, message: '0', data: { dynamic_id: 1 } }),
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
-    await client.uploadImage(Buffer.from([1]), 'a.jpg');
-    await client.uploadImage(Buffer.from([2]), 'b.jpg');
+    await client.publishDynamic({ text: 'a' });
+    await client.publishDynamic({ text: 'b' });
     expect(nav).toHaveBeenCalledTimes(1);
   });
 
@@ -107,7 +106,7 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
 
   it('登录失效：业务 code -101 → BilibiliAuthError（§54-18 Cookie 过期）', async () => {
     const fetchImpl = mockFetch({
-      'https://api.bilibili.com/x/web-interface/nav': () =>
+      'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': () =>
         jsonResponse({ code: -101, message: '账号未登录' }),
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
@@ -119,7 +118,7 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
   it('上传接口返回业务错误 → BilibiliApiError', async () => {
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/web-interface/nav': () => jsonResponse(NAV_OK),
-      'https://api.vc.bilibili.com/api/v1/web/image': () =>
+      'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': () =>
         jsonResponse({ code: -400, message: '请求错误' }),
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });

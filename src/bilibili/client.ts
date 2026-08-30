@@ -28,7 +28,7 @@ interface BiliResponse {
 }
 
 const NAV_URL = 'https://api.bilibili.com/x/web-interface/nav';
-const IMAGE_UPLOAD_URL = 'https://api.vc.bilibili.com/api/v1/web/image';
+const IMAGE_UPLOAD_URL = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs';
 const DYNAMIC_CREATE_URL = 'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create';
 
 // 业务 code 中表示登录失效 / 风控的常见值
@@ -61,14 +61,14 @@ export class BilibiliClient {
 
   /**
    * 上传图片，返回 Bilibili 图片 URL（用于动态 pics[]，规格 §35）。
+   * 接口：POST /x/dynamic/feed/draw/upload_bfs（multipart file_up + category + csrf）。
    */
   async uploadImage(buffer: Buffer, filename: string): Promise<string> {
-    const wbi = await this.#signedParams({});
     const form = new FormData();
-    form.append('file', new Blob([new Uint8Array(buffer)]), filename);
-    for (const [key, value] of Object.entries(wbi)) {
-      form.append(key, String(value));
-    }
+    form.append('file_up', new Blob([new Uint8Array(buffer)]), filename);
+    form.append('category', 'daily');
+    form.append('biz', 'new_dyn');
+    form.append('csrf', this.cookie.jct);
     const payload = await this.#request(IMAGE_UPLOAD_URL, { method: 'POST', body: form });
     const data = payload.data as { image_url?: string } | undefined;
     const imageUrl = data?.image_url;
