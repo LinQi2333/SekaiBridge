@@ -4,9 +4,7 @@ PJSK 推文搬运系统：自动监听 Twitter/X 账户 → 新推文截图并�
 
 > 名字寓意：连接 Twitter/X 世界与 Bilibili 的"世界"（Project Sekai）的桥梁。
 
-- 完整实施规格：[`twitter_qq_bilibili_solution_v0.3.md`](twitter_qq_bilibili_solution_v0.3.md)
 - 详细部署参考：[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md)
-- 架构图：[`docs/architecture.svg`](docs/architecture.svg)
 
 > 本系统面向 **Linux 服务器（Docker）** 部署，不支持 Windows 部署。
 
