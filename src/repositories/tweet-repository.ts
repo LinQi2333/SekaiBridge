@@ -214,6 +214,18 @@ export class TweetRepository {
       .all(limit) as unknown as TweetRow[];
     return rows.map(toDomain);
   }
+
+  /** 还没有推文截图的推文（历史/bootstrap 推文补截图用）。 */
+  listWithoutScreenshot(limit = 100): Tweet[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM tweets
+         WHERE screenshot_path IS NULL
+         ORDER BY id ASC LIMIT ?`,
+      )
+      .all(limit) as unknown as TweetRow[];
+    return rows.map(toDomain);
+  }
 }
 
 function buildListWhere(filter: TweetListFilter): { where: string; params: unknown[] } {

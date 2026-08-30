@@ -79,18 +79,19 @@ describe('DefaultMediaService（规格 §16 / §18 / §21 / §47）', () => {
     const photos = await service.cachePhotos(tweet.id);
     const covers = await service.cacheVideoThumbnails(tweet.id);
 
-    // photo 只缓存 photo（规格 §21），扩展名按 Content-Type
+    // photo 只缓存 photo（规格 §21），扩展名按 Content-Type；返回相对 cacheRoot 路径
     expect(photos).toEqual([
-      path.join(tmpDir, 'twitter-photos', String(tweet.id), '0.jpg'),
-      path.join(tmpDir, 'twitter-photos', String(tweet.id), '1.webp'),
+      `twitter-photos/${tweet.id}/0.jpg`,
+      `twitter-photos/${tweet.id}/1.webp`,
     ]);
     // 视频封面只缓存 video/gif 的封面
     expect(covers).toEqual([
-      path.join(tmpDir, 'video-thumbnails', String(tweet.id), '0.jpg'),
-      path.join(tmpDir, 'video-thumbnails', String(tweet.id), '1.jpg'),
+      `video-thumbnails/${tweet.id}/0.jpg`,
+      `video-thumbnails/${tweet.id}/1.jpg`,
     ]);
-    for (const file of [...photos, ...covers]) {
-      expect(fs.existsSync(file)).toBe(true);
+    for (const rel of [...photos, ...covers]) {
+      const abs = path.join(tmpDir, rel.replace(/\//g, path.sep));
+      expect(fs.existsSync(abs)).toBe(true);
     }
     // 视频封面不进入 twitter-photos
     expect(fs.readdirSync(path.join(tmpDir, 'twitter-photos', String(tweet.id)))).toHaveLength(2);

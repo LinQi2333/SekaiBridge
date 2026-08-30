@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('DefaultScreenshotService（规格 §15 / §47 / §65）', () => {
-  it('生成原推截图并保存到 cache/screenshots/<tweet-id>.png', async () => {
+  it('生成原推截图并保存到 cache/screenshots/<tweet-id>.png（返回相对路径）', async () => {
     testDb = createTestDb();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tqb-shot-'));
     const repo = new TweetRepository(testDb.app.db);
@@ -43,13 +43,16 @@ describe('DefaultScreenshotService（规格 §15 / §47 / §65）', () => {
       tweets: repo,
       tweetToaster,
       cacheDir: path.join(tmpDir, 'screenshots'),
+      cacheRoot: tmpDir,
       fetchImpl,
     });
 
-    const filePath = await service.render(tweet.id);
-    expect(filePath).toBe(path.join(tmpDir, 'screenshots', `${tweet.id}.png`));
-    expect(fs.existsSync(filePath)).toBe(true);
-    expect(fs.readFileSync(filePath)).toEqual(PNG);
+    const relPath = await service.render(tweet.id);
+    // 相对 cacheRoot 的正斜杠路径（可跨机器部署）
+    expect(relPath).toBe(`screenshots/${tweet.id}.png`);
+    const absPath = path.join(tmpDir, relPath.replace(/\//g, path.sep));
+    expect(fs.existsSync(absPath)).toBe(true);
+    expect(fs.readFileSync(absPath)).toEqual(PNG);
   });
 
   it('render 请求为 original-only（空模板、无 Logo、选中焦点推文）', async () => {
@@ -69,6 +72,7 @@ describe('DefaultScreenshotService（规格 §15 / §47 / §65）', () => {
       tweets: repo,
       tweetToaster,
       cacheDir: path.join(tmpDir, 'screenshots'),
+      cacheRoot: tmpDir,
       fetchImpl,
     });
 
@@ -93,6 +97,7 @@ describe('DefaultScreenshotService（规格 §15 / §47 / §65）', () => {
       tweets: repo,
       tweetToaster: { getTweet: vi.fn(), render: vi.fn() },
       cacheDir: path.join(tmpDir, 'screenshots'),
+      cacheRoot: tmpDir,
     });
     await expect(service.render(9999)).rejects.toBeInstanceOf(NotFoundError);
   });

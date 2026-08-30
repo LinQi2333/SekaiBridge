@@ -111,6 +111,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
         tweets: repos.tweets,
         tweetToaster: deps.tweetToaster,
         cacheDir: path.join(deps.config.cacheRoot, 'screenshots'),
+        cacheRoot: deps.config.cacheRoot,
         fetchImpl,
       })
     : new StubScreenshotService();

@@ -16,6 +16,14 @@ retry = on_command("重试", priority=1)
 PENDING_LABELS = {"pending": "待翻译", "translated": "已翻译", "published": "已发布", "failed": "失败", "all": "全部"}
 
 
+def summarize(text: str, max_chars: int = 30) -> str:
+    """推文内容摘要：合并空白/换行后截取前 max_chars 个字符。"""
+    flat = " ".join((text or "").split())
+    if len(flat) <= max_chars:
+        return flat
+    return flat[:max_chars] + "…"
+
+
 async def precheck(event: GroupMessageEvent) -> bool:
     """消息去重：重复消息返回 True，直接忽略。"""
     return await dedupe_message(event)
@@ -96,10 +104,13 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
     lines = []
     for t in result["items"]:
         deleted = "原推已删除 / " if t["sourceStatus"] == "SOURCE_DELETED" else ""
-        lines.append(f"#{t['id']} @{t['authorScreenName']}   {deleted}{t['workflowStatus']}")
+        lines.append(
+            f"#{t['id']} @{t['authorScreenName']}   {deleted}{t['workflowStatus']}\n"
+            f"{summarize(t.get('originalText'))}"
+        )
     total_pages = max(1, (result["total"] + 9) // 10)
     lines.append(f"\n第 {page}/{total_pages} 页 · 共 {result['total']} 条")
-    await bot.send(event, "\n".join(lines))
+    await bot.send(event, "\n\n".join(lines))
 
 
 @show.handle()

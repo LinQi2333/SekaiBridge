@@ -179,10 +179,13 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     // 处理管线已同步完成（pollOnce await onNewTweets），从 DB 读取最新状态
     const tweet = repos.tweets.findById(newTweet!.id);
     expect(tweet?.workflowStatus).toBe(WorkflowStatus.SCREENSHOT_READY);
-    const shotPath = tweet?.screenshotPath;
-    expect(shotPath).toBe(path.join(tmpDir, 'screenshots', String(tweet?.id)) + '.png');
-    expect(fs.existsSync(shotPath!)).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, 'twitter-photos', String(tweet?.id), '0.jpg'))).toBe(true);
+    const shotRel = tweet?.screenshotPath;
+    // DB 存相对 cacheRoot 的正斜杠路径
+    expect(shotRel).toBe(`screenshots/${tweet?.id}.png`);
+    expect(fs.existsSync(path.join(tmpDir, shotRel!.replace(/\//g, path.sep)))).toBe(true);
+    expect(
+      fs.existsSync(path.join(tmpDir, 'twitter-photos', String(tweet?.id), '0.jpg')),
+    ).toBe(true);
 
     // 3) Mock QQ：拉取通知并 ack（§42）
     const list = await api('/api/notifications', { token: TOKEN });
@@ -192,7 +195,10 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     expect(notifications[0]?.text).toContain('账号：@foo');
     expect(notifications[0]?.text).toContain('原推：');
     expect(notifications[0]?.text).not.toContain('頑張る'); // §51 不含原文
-    expect(notifications[0]?.screenshotPath).toBe(shotPath);
+    // API 返回的是按当前 cacheRoot 解析后的绝对路径
+    expect(notifications[0]?.screenshotPath).toBe(
+      path.join(tmpDir, shotRel!.replace(/\//g, path.sep)),
+    );
     const ack = await api(`/api/notifications/${notifications[0]!.id}/ack`, { method: 'POST', token: TOKEN });
     expect((ack.json.data as { acked: boolean }).acked).toBe(true);
 
@@ -272,9 +278,9 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     expect(pending[0]?.text).toContain('⚠️ 此推文包含视频。');
     expect(pending[0]?.text).toContain('视频本体不会下载或转载');
     expect(pending[0]?.text).not.toContain('頑張る');
-    const coverPath = pending[0]?.videoThumbnails[0];
-    expect(coverPath).toBe(path.join(tmpDir, 'video-thumbnails', String(tweet?.id), '0.jpg'));
-    expect(fs.existsSync(coverPath!)).toBe(true);
+    const coverRel = pending[0]?.videoThumbnails[0];
+    expect(coverRel).toBe(`video-thumbnails/${tweet?.id}/0.jpg`);
+    expect(fs.existsSync(path.join(tmpDir, coverRel!.replace(/\//g, path.sep)))).toBe(true);
 
     // 视频本体从未下载（§52）：没有任何 .mp4 请求
     const requested = fetchImpl.mock.calls.map((c) => String(c[0]));

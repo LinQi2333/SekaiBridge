@@ -124,4 +124,14 @@ describe('TweetRepository（规格 §8 / §10）', () => {
     const due = r.listForSourceCheck();
     expect(due.map((t) => t.xTweetId)).toEqual(['200']);
   });
+
+  it('listWithoutScreenshot 只返回没有截图的推文', () => {
+    const r = setup();
+    const noShot = r.create(tweetInput({ xTweetId: '100' }));
+    const withShot = r.create(tweetInput({ xTweetId: '200' }));
+    r.setScreenshotPath(withShot.id, 'cache/screenshots/2.png');
+
+    const due = r.listWithoutScreenshot();
+    expect(due.map((t) => t.id)).toEqual([noShot.id]);
+  });
 });

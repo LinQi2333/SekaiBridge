@@ -6,6 +6,7 @@ import { EXT_BY_CONTENT_TYPE, safeDownload } from '../media/safe-download.js';
 import type { MediaFetcher } from '../media/media-fetcher.js';
 import type { TweetRepository } from '../repositories/tweet-repository.js';
 import { NotImplementedError, NotFoundError } from './errors.js';
+import { toPortablePath } from './screenshot-service.js';
 
 /**
  * 媒体处理（规格 §16 / §18 / §20 / §21 / §47 / §48）。
@@ -89,7 +90,8 @@ export class DefaultMediaService implements MediaService {
       const ext = EXT_BY_CONTENT_TYPE[contentType] ?? 'img';
       const filePath = path.join(dir, `${index}.${ext}`);
       await fs.writeFile(filePath, bytes);
-      paths.push(filePath);
+      // 相对 cacheRoot 的正斜杠路径（可跨机器部署）
+      paths.push(toPortablePath(path.relative(this.cacheRoot, filePath)));
     }
     return paths;
   }

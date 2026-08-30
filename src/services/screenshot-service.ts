@@ -20,8 +20,10 @@ export interface ScreenshotService {
 export interface ScreenshotServiceOptions {
   tweets: TweetRepository;
   tweetToaster: Pick<TweetToasterClient, 'getTweet' | 'render'>;
-  /** 截图缓存目录（cacheRoot/screenshots）。 */
+  /** 截图缓存目录（cacheRoot/screenshots，绝对路径）。 */
   cacheDir: string;
+  /** 缓存根目录（绝对路径）；返回相对该目录的路径便于跨机器部署。 */
+  cacheRoot: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -29,12 +31,14 @@ export class DefaultScreenshotService implements ScreenshotService {
   private readonly tweets: TweetRepository;
   private readonly tweetToaster: Pick<TweetToasterClient, 'getTweet' | 'render'>;
   private readonly cacheDir: string;
+  private readonly cacheRoot: string;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: ScreenshotServiceOptions) {
     this.tweets = options.tweets;
     this.tweetToaster = options.tweetToaster;
     this.cacheDir = options.cacheDir;
+    this.cacheRoot = options.cacheRoot;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
   }
 
@@ -69,8 +73,14 @@ export class DefaultScreenshotService implements ScreenshotService {
     await fs.mkdir(this.cacheDir, { recursive: true });
     const filePath = path.join(this.cacheDir, `${tweetId}.png`);
     await fs.writeFile(filePath, bytes);
-    return filePath;
+    // 返回相对 cacheRoot 的路径（正斜杠），保证数据库可跨机器部署
+    return toPortablePath(path.relative(this.cacheRoot, filePath));
   }
+}
+
+/** 平台分隔符 → 正斜杠（DB 统一存储格式）。 */
+export function toPortablePath(p: string): string {
+  return p.split(path.sep).join('/');
 }
 
 export class StubScreenshotService implements ScreenshotService {

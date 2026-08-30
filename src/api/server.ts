@@ -1,4 +1,5 @@
 import http from 'node:http';
+import path from 'node:path';
 import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from '../bilibili/errors.js';
 import type { AppConfig } from '../config/config.js';
 import { formatTweetView } from '../qq/format.js';
@@ -42,6 +43,30 @@ class ApiError extends Error {
 }
 
 const MAX_BODY = 1024 * 1024;
+
+/** 媒体路径解析：DB 存相对 cacheRoot 路径（可移植），返回时按当前机器转绝对路径。 */
+function resolveMediaPath(p: string | null, cacheRoot: string): string | null {
+  if (!p) return null;
+  if (path.isAbsolute(p)) return p;
+  return path.resolve(cacheRoot, p);
+}
+
+function resolveTweetMediaPaths(t: Record<string, unknown>, cacheRoot: string): void {
+  if (typeof t.screenshotPath === 'string') {
+    t.screenshotPath = resolveMediaPath(t.screenshotPath, cacheRoot);
+  }
+}
+
+function resolveNotificationMediaPaths(n: Record<string, unknown>, cacheRoot: string): void {
+  if (typeof n.screenshotPath === 'string') {
+    n.screenshotPath = resolveMediaPath(n.screenshotPath, cacheRoot);
+  }
+  if (Array.isArray(n.videoThumbnails)) {
+    n.videoThumbnails = n.videoThumbnails.map((v) =>
+      typeof v === 'string' ? resolveMediaPath(v, cacheRoot) : v,
+    );
+  }
+}
 
 const LIST_FILTERS = ['pending', 'translated', 'published', 'failed', 'all'] as const;
 
@@ -218,6 +243,9 @@ export function createApiServer(options: ApiServerOptions): http.Server {
             .map((s) => Number.parseInt(s, 10))
             .filter((n) => Number.isInteger(n));
           const result = services.tweetQuery.getManyByIds(ids);
+          for (const item of result.tweets) {
+            resolveTweetMediaPaths(item as unknown as Record<string, unknown>, config.cacheRoot);
+          }
           ok(res, result);
           return;
         }
@@ -225,6 +253,9 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         const page = Number.parseInt(q.get('page') ?? '1', 10);
         const pageSize = Number.parseInt(q.get('page_size') ?? '20', 10);
         const result = services.tweetQuery.list(filter, { page, pageSize });
+        for (const item of result.items) {
+          resolveTweetMediaPaths(item as unknown as Record<string, unknown>, config.cacheRoot);
+        }
         ok(res, result);
         return;
       }
@@ -234,6 +265,7 @@ export function createApiServer(options: ApiServerOptions): http.Server {
       if (tweetMatch && method === 'GET') {
         authorize(req, 'member');
         const tweet = services.tweetQuery.getById(Number(tweetMatch[1]));
+        resolveTweetMediaPaths(tweet as unknown as Record<string, unknown>, config.cacheRoot);
         ok(res, { tweet, format: { view: formatTweetView(tweet) } });
         return;
       }
@@ -286,7 +318,11 @@ export function createApiServer(options: ApiServerOptions): http.Server {
       if (method === 'GET' && pathname === '/api/notifications') {
         checkToken(req);
         const limit = Math.min(100, Math.max(1, Number.parseInt(q.get('limit') ?? '20', 10)));
-        ok(res, { notifications: notifications.listPending(limit) });
+        const pending = notifications.listPending(limit);
+        for (const n of pending) {
+          resolveNotificationMediaPaths(n as unknown as Record<string, unknown>, config.cacheRoot);
+        }
+        ok(res, { notifications: pending });
         return;
       }
       const ackMatch = /^\/api\/notifications\/(\d+)\/ack$/.exec(pathname);
