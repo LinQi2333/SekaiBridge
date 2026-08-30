@@ -36,8 +36,8 @@ QQ 群 ◄──► NoneBot2 ◄──NapCat(Linux QQ) ◄┘   │
 ### 第 1 步：获取代码与配置
 
 ```bash
-git clone <你的仓库地址> twitter-qq-bilibili
-cd twitter-qq-bilibili
+git clone <你的仓库地址> SekaiBridge
+cd SekaiBridge
 cp .env.example .env
 vim .env   # 填入下面的配置
 ```
