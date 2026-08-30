@@ -88,7 +88,7 @@ export interface ServiceDeps {
   config: AppConfig;
   tweetToaster: TweetToasterClient;
   /** 增量新推文回调（NoneBot2 通知由默认处理器生成）；不传则默认走 newTweetProcessor。 */
-  onNewTweets?: (tweets: import('../domain/tweet.js').Tweet[]) => void;
+  onNewTweets?: (tweets: import('../domain/tweet.js').Tweet[]) => void | Promise<void>;
   /** 发布服务注入（测试用）；不传则使用 stub。 */
   publish?: PublishService;
   /** Bilibili 上传/发布器（提供后自动构造真实 PublishService）。 */
@@ -96,19 +96,23 @@ export interface ServiceDeps {
     imageUploader: ImageUploader;
     dynamicPublisher: DynamicPublisher;
   };
+  /** 全局 fetch 注入（测试用；默认 globalThis.fetch）。 */
+  fetchImpl?: typeof fetch;
 }
 
 export function createServices(repos: Repositories, deps?: ServiceDeps): AppServices {
   const workflow = new SqliteWorkflowService(repos.tweets);
+  const fetchImpl = deps?.fetchImpl ?? globalThis.fetch;
   const screenshot: ScreenshotService = deps
     ? new DefaultScreenshotService({
         tweets: repos.tweets,
         tweetToaster: deps.tweetToaster,
         cacheDir: path.join(deps.config.cacheRoot, 'screenshots'),
+        fetchImpl,
       })
     : new StubScreenshotService();
   const media: MediaService = deps
-    ? new DefaultMediaService({ tweets: repos.tweets, cacheRoot: deps.config.cacheRoot })
+    ? new DefaultMediaService({ tweets: repos.tweets, cacheRoot: deps.config.cacheRoot, fetchImpl })
     : new StubMediaService();
   const newTweetProcessor = new DefaultNewTweetProcessor({
     tweets: repos.tweets,
@@ -131,7 +135,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
         tweets: repos.tweets,
         tweetToaster: deps.tweetToaster,
         pollIntervalMs: deps.config.twitterPollInterval * 1000,
-        onNewTweets: deps.onNewTweets ?? ((tweets) => void newTweetProcessor.process(tweets)),
+        onNewTweets: deps.onNewTweets ?? ((tweets) => newTweetProcessor.process(tweets)),
       })
     : new StubMonitorService();
 
@@ -146,6 +150,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
           workflow,
           imageUploader: deps.bilibili.imageUploader,
           dynamicPublisher: deps.bilibili.dynamicPublisher,
+          fetchImpl,
         })
       : new StubPublishService());
 

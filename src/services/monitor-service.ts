@@ -34,8 +34,8 @@ export interface MonitorOptions {
   pollIntervalMs: number;
   /** 每账户轮询 jitter（毫秒，±），默认 10000（规格 §6 ±10 秒）。 */
   jitterMs?: number;
-  /** 增量检测到新推文时的回调（Phase 6 在此发送 QQ 通知）。 */
-  onNewTweets?: (tweets: Tweet[]) => void;
+  /** 增量检测到新推文时的回调（Phase 6 在此发送 QQ 通知）；支持异步。 */
+  onNewTweets?: (tweets: Tweet[]) => void | Promise<void>;
 }
 
 /**
@@ -135,7 +135,8 @@ export class SqliteMonitorService implements MonitorService {
         result.newTweets = newTweets;
         if (newTweets.length > 0) {
           log('monitor.new_tweets', `@${account.screenName} 检测到 ${newTweets.length} 条新推文`);
-          this.onNewTweets?.(newTweets);
+          // await 处理管线（截图/媒体/通知），保证 pollOnce 返回时新推文已处理完
+          await this.onNewTweets?.(newTweets);
         }
       }
       return result;
