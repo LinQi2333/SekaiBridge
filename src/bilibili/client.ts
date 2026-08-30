@@ -1,4 +1,5 @@
 import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from './errors.js';
+import type { UploadedImage } from './image-upload.js';
 import { extractKeyFromImageUrl, signWbi, type WbiSignResult } from './wbi.js';
 
 /** Bilibili 登录 Cookie（规格 §40：只放 .env，禁止进入 Git/日志）。 */
@@ -29,7 +30,7 @@ interface BiliResponse {
 
 const NAV_URL = 'https://api.bilibili.com/x/web-interface/nav';
 const IMAGE_UPLOAD_URL = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs';
-const DYNAMIC_CREATE_URL = 'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create';
+const DYNAMIC_CREATE_URL = 'https://api.bilibili.com/x/dynamic/feed/create/dyn';
 
 // 业务 code 中表示登录失效 / 风控的常见值
 // -101 账号未登录、-111 csrf 校验失败、-352 风控校验失败、-412 请求被拦截
@@ -60,50 +61,80 @@ export class BilibiliClient {
   }
 
   /**
-   * 上传图片，返回 Bilibili 图片 URL（用于动态 pics[]，规格 §35）。
+   * 上传图片，返回 Bilibili 图片信息（用于动态 pics[]，规格 §35）。
    * 接口：POST /x/dynamic/feed/draw/upload_bfs（multipart file_up + category + csrf）。
    */
-  async uploadImage(buffer: Buffer, filename: string): Promise<string> {
+  async uploadImage(
+    buffer: Buffer,
+    filename: string,
+  ): Promise<{ url: string; width: number; height: number; sizeKb: number }> {
     const form = new FormData();
     form.append('file_up', new Blob([new Uint8Array(buffer)]), filename);
     form.append('category', 'daily');
     form.append('biz', 'new_dyn');
     form.append('csrf', this.cookie.jct);
     const payload = await this.#request(IMAGE_UPLOAD_URL, { method: 'POST', body: form });
-    const data = payload.data as { image_url?: string } | undefined;
+    const data = payload.data as
+      | { image_url?: string; image_width?: number; image_height?: number; img_size?: number }
+      | undefined;
     const imageUrl = data?.image_url;
     if (!imageUrl) {
       throw new BilibiliApiError('图片上传成功但未返回图片地址', payload.code);
     }
-    return imageUrl;
+    return {
+      url: imageUrl,
+      width: data?.image_width ?? 0,
+      height: data?.image_height ?? 0,
+      sizeKb: data?.img_size ?? 0,
+    };
   }
 
   /**
    * 发布图片动态（type=4），返回动态 ID。
    * content 为最终翻译文本；pics 为已上传的 Bilibili 图片 URL；topicId 可选。
    */
+  /**
+   * 发布图片动态（新接口 POST /x/dynamic/feed/create/dyn，支持图片与话题）。
+   * 文本在 dyn_req.content.contents[].raw_text；scene=2 带图。
+   */
   async publishDynamic(input: {
     text: string;
-    pics?: string[];
+    pics?: UploadedImage[];
     topicId?: string | null;
+    topicName?: string | null;
   }): Promise<string> {
-    const params: Record<string, string | number> = {
-      type: 4,
-      biz_id: JSON.stringify(input.pics ?? []),
-      content: input.text,
+    const dynReq: Record<string, unknown> = {
+      content: { contents: [{ raw_text: input.text, type: 1, biz_id: '' }] },
+      scene: input.pics && input.pics.length > 0 ? 2 : 1,
+      option: { close_comment: 0 },
+      meta: { app_meta: { from: 'create.dynamic.web', mobi_app: 'web' } },
     };
+    if (input.pics && input.pics.length > 0) {
+      dynReq.pics = input.pics.map((p) => ({
+        img_src: p.url,
+        img_width: p.width,
+        img_height: p.height,
+        img_size: p.sizeKb,
+      }));
+    }
     if (input.topicId) {
-      params.topic_id = input.topicId;
+      dynReq.topic = {
+        from_source: 'dyn.web.list',
+        from_topic_id: 0,
+        id: Number(input.topicId),
+        name: input.topicName ?? '',
+      };
     }
-    const wbi = await this.#signedParams(params);
-    const form = new FormData();
-    for (const [key, value] of Object.entries({ ...params, ...wbi, csrf: this.cookie.jct })) {
-      form.append(key, String(value));
-    }
-    const payload = await this.#request(DYNAMIC_CREATE_URL, { method: 'POST', body: form });
-    const data = payload.data as { dynamic_id?: string | number } | undefined;
-    const dynamicId = data?.dynamic_id;
-    if (dynamicId === undefined || dynamicId === null) {
+    const wbi = await this.#signedParams({ csrf: this.cookie.jct });
+    const url = `${DYNAMIC_CREATE_URL}?csrf=${this.cookie.jct}&w_rid=${wbi.w_rid}&wts=${wbi.wts}`;
+    const payload = await this.#request(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ dyn_req: dynReq }),
+    });
+    const data = payload.data as { dyn_id_str?: string } | undefined;
+    const dynamicId = data?.dyn_id_str;
+    if (!dynamicId) {
       throw new BilibiliApiError('动态发布成功但未返回动态 ID', payload.code);
     }
     return String(dynamicId);

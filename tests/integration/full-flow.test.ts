@@ -92,7 +92,12 @@ function setupFlow(newMedia: ToasterMedia[]): FlowEnv & { services: ReturnType<t
   });
 
   const imageUploader = {
-    uploadImage: vi.fn(async (_buf: Buffer, filename: string) => `https://i0.hdslb.com/bfs/article/${filename}`),
+    uploadImage: vi.fn(async (_buf: Buffer, filename: string) => ({
+      url: `https://i0.hdslb.com/bfs/article/${filename}`,
+      width: 1280,
+      height: 1406,
+      sizeKb: 100,
+    })),
   };
   const dynamicPublisher = {
     publishDynamic: vi.fn(async () => '90001'),
@@ -237,8 +242,16 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     expect(imageUploader.uploadImage).toHaveBeenCalledTimes(1);
     expect(dynamicPublisher.publishDynamic).toHaveBeenCalledWith({
       text: '今天也辛苦啦～！🌸\n\n第二行',
-      pics: ['https://i0.hdslb.com/bfs/article/photo-a.jpg'],
+      pics: [
+        {
+          url: 'https://i0.hdslb.com/bfs/article/photo-a.jpg',
+          width: 1280,
+          height: 1406,
+          sizeKb: 100,
+        },
+      ],
       topicId: '23456',
+      topicName: 'hololive',
     });
 
     // 7) 幂等：再次发布不调用 Bilibili（§38）
@@ -307,6 +320,7 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
       text: '纯文本译文',
       pics: [],
       topicId: null,
+      topicName: null,
     });
     // 视频封面不上传 Bilibili（§53）：twitter-photos 目录根本不会创建
     expect(fs.existsSync(path.join(tmpDir, 'twitter-photos', String(tweet?.id)))).toBe(false);

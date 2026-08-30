@@ -1,6 +1,6 @@
 import path from 'node:path';
-import type { ImageUploader } from '../bilibili/image-upload.js';
 import type { DynamicPublisher } from '../bilibili/dynamic-publisher.js';
+import type { ImageUploader, UploadedImage } from '../bilibili/image-upload.js';
 import { PublishStatus, type PublishRecord } from '../domain/publish.js';
 import { photoMedia } from '../domain/tweet.js';
 import { WorkflowStatus } from '../domain/workflow.js';
@@ -113,13 +113,13 @@ export class DefaultPublishService implements PublishService {
     try {
       // 只上传 photo（§21 / §53）；视频与视频封面永不进入 pics[]
       const photos = photoMedia(tweet);
-      const pics: string[] = [];
+      const pics: UploadedImage[] = [];
       for (const photo of photos) {
         const { bytes, contentType } = await this.fetcher(photo.url);
         const filename = filenameForPhoto(photo.url, contentType);
-        const imageUrl = await this.imageUploader.uploadImage(bytes, filename);
-        pics.push(imageUrl);
-        log('bilibili.upload.complete', `#${tweetId} ${imageUrl}`);
+        const uploaded = await this.imageUploader.uploadImage(bytes, filename);
+        pics.push(uploaded);
+        log('bilibili.upload.complete', `#${tweetId} ${uploaded.url}`);
       }
 
       log('bilibili.publish.started', `#${tweetId} 文本 + ${pics.length} 张图片`);
@@ -127,6 +127,7 @@ export class DefaultPublishService implements PublishService {
         text: translation.text,
         pics,
         topicId,
+        topicName: alias ? this.topics.findByAlias(alias)?.name ?? null : null,
       });
       const record = this.publishes.create({
         tweetId,

@@ -27,30 +27,44 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 /** 按 URL 分发的 mock fetch。 */
-function mockFetch(routes: Record<string, (init: RequestInit) => Response>) {
+function mockFetch(routes: Record<string, (init: RequestInit, url: string) => Response>) {
   return vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     const key = String(url);
     for (const [prefix, handler] of Object.entries(routes)) {
-      if (key.startsWith(prefix)) return handler(init ?? {});
+      if (key.startsWith(prefix)) return handler(init ?? {}, key);
     }
     return jsonResponse({ code: -404, message: 'not found' });
   });
 }
 
 describe('BilibiliClient（规格 §36 / §40）', () => {
-  it('uploadImage 成功：带 Cookie、multipart file、返回图片 URL', async () => {
+  it('uploadImage 成功：带 Cookie、multipart file_up，返回图片信息', async () => {
     let uploadInit: RequestInit | undefined;
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/web-interface/nav': () => jsonResponse(NAV_OK),
       'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': (init) => {
         uploadInit = init;
-        return jsonResponse({ code: 0, message: '0', data: { image_url: 'https://i0.hdslb.com/bfs/article/x.jpg' } });
+        return jsonResponse({
+          code: 0,
+          message: '0',
+          data: {
+            image_url: 'https://i0.hdslb.com/bfs/article/x.jpg',
+            image_width: 1280,
+            image_height: 1406,
+            img_size: 1070.6,
+          },
+        });
       },
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
 
-    const url = await client.uploadImage(Buffer.from([1, 2, 3]), 'a.jpg');
-    expect(url).toBe('https://i0.hdslb.com/bfs/article/x.jpg');
+    const uploaded = await client.uploadImage(Buffer.from([1, 2, 3]), 'a.jpg');
+    expect(uploaded).toEqual({
+      url: 'https://i0.hdslb.com/bfs/article/x.jpg',
+      width: 1280,
+      height: 1406,
+      sizeKb: 1070.6,
+    });
 
     // 上传请求带 cookie 与 multipart file_up
     const headers = uploadInit?.headers as Record<string, string> | undefined;
@@ -69,8 +83,8 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     const nav = vi.fn(() => jsonResponse(NAV_OK));
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/web-interface/nav': nav,
-      'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create': () =>
-        jsonResponse({ code: 0, message: '0', data: { dynamic_id: 1 } }),
+      'https://api.bilibili.com/x/dynamic/feed/create/dyn': () =>
+        jsonResponse({ code: 0, message: '0', data: { dyn_id_str: '1' } }),
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
     await client.publishDynamic({ text: 'a' });
@@ -78,30 +92,49 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     expect(nav).toHaveBeenCalledTimes(1);
   });
 
-  it('publishDynamic 成功：form 含 type/biz_id/content/csrf，返回动态 ID', async () => {
+  it('publishDynamic 成功：JSON dyn_req 含文本/图片/话题，返回动态 ID', async () => {
     let createInit: RequestInit | undefined;
+    let createUrl = '';
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/web-interface/nav': () => jsonResponse(NAV_OK),
-      'https://api.vc.bilibili.com/dynamic_svr/v1/dynamic_svr/create': (init) => {
+      'https://api.bilibili.com/x/dynamic/feed/create/dyn': (init, url) => {
         createInit = init;
-        return jsonResponse({ code: 0, message: '0', data: { dynamic_id: 123456 } });
+        createUrl = String(url);
+        return jsonResponse({ code: 0, message: '0', data: { dyn_id_str: '123456' } });
       },
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
 
     const dynamicId = await client.publishDynamic({
       text: '今天也辛苦啦～！🌸',
-      pics: ['https://i0.hdslb.com/bfs/article/a.jpg'],
+      pics: [
+        { url: 'https://i0.hdslb.com/bfs/article/a.jpg', width: 1280, height: 1406, sizeKb: 100 },
+      ],
       topicId: '23456',
+      topicName: 'hololive',
     });
     expect(dynamicId).toBe('123456');
 
-    const body = createInit?.body as FormData;
-    expect(body.get('type')).toBe('4');
-    expect(body.get('biz_id')).toBe(JSON.stringify(['https://i0.hdslb.com/bfs/article/a.jpg']));
-    expect(body.get('content')).toBe('今天也辛苦啦～！🌸');
-    expect(body.get('topic_id')).toBe('23456');
-    expect(body.get('csrf')).toBe('j');
+    // wbi 签名参数在 query
+    expect(createUrl).toContain('csrf=j');
+    expect(createUrl).toContain('w_rid=');
+    expect(createUrl).toContain('wts=');
+
+    const body = JSON.parse(String(createInit?.body)) as {
+      dyn_req: {
+        content: { contents: { raw_text: string }[] };
+        scene: number;
+        pics: { img_src: string; img_width: number }[];
+        topic: { id: number; name: string };
+      };
+    };
+    expect(body.dyn_req.content.contents[0]?.raw_text).toBe('今天也辛苦啦～！🌸');
+    expect(body.dyn_req.scene).toBe(2);
+    expect(body.dyn_req.pics[0]).toMatchObject({
+      img_src: 'https://i0.hdslb.com/bfs/article/a.jpg',
+      img_width: 1280,
+    });
+    expect(body.dyn_req.topic).toMatchObject({ id: 23456, name: 'hololive' });
   });
 
   it('登录失效：业务 code -101 → BilibiliAuthError（§54-18 Cookie 过期）', async () => {

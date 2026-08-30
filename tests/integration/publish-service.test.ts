@@ -34,7 +34,12 @@ function setup(media: TweetMedia[]) {
   const repos = createRepositories(testDb.app.db);
   const workflow = new SqliteWorkflowService(repos.tweets);
   const imageUploader = {
-    uploadImage: vi.fn(async (_buf: Buffer, filename: string) => `https://i0.hdslb.com/bfs/article/${filename}`),
+    uploadImage: vi.fn(async (_buf: Buffer, filename: string) => ({
+      url: `https://i0.hdslb.com/bfs/article/${filename}`,
+      width: 1280,
+      height: 1406,
+      sizeKb: 100,
+    })),
   };
   const dynamicPublisher = {
     publishDynamic: vi.fn(async (input: { text: string; pics?: string[]; topicId?: string | null }) =>
@@ -105,10 +110,21 @@ describe('DefaultPublishService（规格 §33-§39 / §53）', () => {
     expect(dynamicPublisher.publishDynamic).toHaveBeenCalledWith({
       text: '译文正文 🌸',
       pics: [
-        'https://i0.hdslb.com/bfs/article/a.jpg',
-        'https://i0.hdslb.com/bfs/article/c.jpg',
+        {
+          url: 'https://i0.hdslb.com/bfs/article/a.jpg',
+          width: 1280,
+          height: 1406,
+          sizeKb: 100,
+        },
+        {
+          url: 'https://i0.hdslb.com/bfs/article/c.jpg',
+          width: 1280,
+          height: 1406,
+          sizeKb: 100,
+        },
       ],
       topicId: null,
+      topicName: null,
     });
     expect(repos.tweets.findById(tweetId)?.workflowStatus).toBe(WorkflowStatus.PUBLISHED);
   });
@@ -132,7 +148,7 @@ describe('DefaultPublishService（规格 §33-§39 / §53）', () => {
     expect(imageUploader.uploadImage).toHaveBeenCalledTimes(2);
     const pics = dynamicPublisher.publishDynamic.mock.calls[0]?.[0].pics;
     expect(pics).toHaveLength(2);
-    expect(pics).not.toContain('cover-b.jpg');
+    expect(pics?.some((p) => String(p?.url).includes('cover-b'))).toBe(false);
   });
 
   it('视频-only 推文：纯文本动态，pics 为空（§22）', async () => {
@@ -147,6 +163,7 @@ describe('DefaultPublishService（规格 §33-§39 / §53）', () => {
       text: '只有翻译文本',
       pics: [],
       topicId: null,
+      topicName: null,
     });
   });
 
