@@ -273,7 +273,51 @@ API_TOKEN=你的64位随机hex
 
 ## 6. 部署步骤
 
-### 6.1 Docker Compose 部署（推荐）
+### 6.0 Linux / Docker 一键部署（推荐）
+
+整个系统（含 QQ）全容器化，适合 Linux 服务器：
+
+```bash
+# 1. 安装 Docker Engine + Docker Compose v2（Ubuntu/Debian/CentOS 均可）
+
+# 2. 克隆仓库并配置
+git clone <你的仓库地址> twitter-qq-bilibili && cd twitter-qq-bilibili
+cp .env.example .env
+# 编辑 .env：QQ_GROUP_IDS / QQ_ADMIN_IDS / BILI_* / API_TOKEN 必填
+
+# 3. 一键拉起全部服务（主程序 + TweetToaster + NapCat + NoneBot2）
+docker compose up -d --build
+
+# 4. 登录机器人 QQ（Linux 下用 WebUI 扫码，与 Windows 不同）
+docker compose logs napcat | grep -i "webui\|token"   # 查看 WebUI token
+# 浏览器打开 http://<服务器IP>:6099/webui
+# 输入 token → 扫码登录机器人 QQ（手机 QQ 确认）
+# 若 OneBot WS（3001）未监听：WebUI → 网络配置 → 新建 WebSocket 服务，端口 3001
+
+# 5. 健康检查
+curl http://127.0.0.1:18080/api/health
+```
+
+| 服务 | 容器 | 端口 | 说明 |
+| --- | --- | --- | --- |
+| `app` | 本仓库构建 | 18080（仅本机） | 主程序 |
+| `tweettoaster` | 官方镜像 | 内网 | Twitter 数据 + 截图 |
+| `napcat` | `mlikiowa/napcat-docker:latest` | 6099（WebUI）+ 3001（OneBot WS） | Linux QQ 无头版 |
+| `nonebot2` | `nonebot-plugin/` 构建 | 内网 | QQ 命令 + 通知轮询 |
+
+**Windows 与本方案的差异**（QQ 侧）：
+
+| 项目 | Windows 本机（已实测） | Linux / Docker |
+| --- | --- | --- |
+| QQ 客户端 | 本机已装的 Windows QQNT | 镜像内置 Linux 版 QQ（无头） |
+| NapCat 启动 | `napiLoader.bat` 注入 | 容器自启动 |
+| 登录方式 | QQ 窗口登录 | WebUI `:6099` 扫码 |
+| OneBot WS | `127.0.0.1:3001` | `:3001`（容器内 `napcat:3001`） |
+| NoneBot2 运行 | venv + `bot.py` | 容器（`nonebot-plugin/`） |
+
+> 上层（主程序 HTTP API、NoneBot2 插件）**零改动**，两端接口完全一致。
+
+### 6.1 Docker Compose 部署（Windows 本机验证版）
 
 ```bash
 # 1. 克隆 / 拷贝项目

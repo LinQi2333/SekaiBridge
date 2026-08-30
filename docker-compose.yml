@@ -1,15 +1,19 @@
 # Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统（规格 §58）
 #
+# Linux / Docker 一键部署（推荐）：
+#   docker compose up -d --build
+#   docker compose logs -f napcat     # 查看 WebUI token
+#   浏览器打开 http://<服务器IP>:6099/webui → 扫码登录机器人 QQ
+#   （如 3001 未监听：WebUI 网络配置中新建 WebSocket 服务，端口 3001）
+#
 # 服务：
-#   app         主程序（监听 / 截图 / 来源检查 / HTTP API / 发布）
-#   tweettoaster TweetToaster（Twitter 数据 + 截图渲染，官方镜像）
+#   tweettoaster  Twitter 数据 + 截图渲染（官方镜像）
+#   app           主程序（监听 / HTTP API :18080 / 发布）
+#   napcat        NapCat Linux（内置 Linux QQ 无头版，OneBot WS :3001 + WebUI :6099）
+#   nonebot2      QQ 命令 + 通知轮询（本仓库 nonebot-plugin/）
 #
-# QQ / NoneBot2 / NapCat 按部署环境独立运行，不塞进本 Compose（规格 §58）。
-#
-# 用法：
-#   docker compose up -d
-# 敏感配置通过 .env 传入（与仓库内 .env.example 同名变量）：
-#   BILI_SESSDATA / BILI_JCT / BILI_DEDEUSERID / QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
+# 敏感配置通过 .env 传入：BILI_SESSDATA / BILI_JCT / BILI_DEDEUSERID /
+#   QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
 
 services:
   tweettoaster:
@@ -18,8 +22,9 @@ services:
     shm_size: 512m
     volumes:
       - tweettoaster-cache:/app/Matsuri_translation/frontend/cache
-    ports:
-      - "127.0.0.1:8082:8082"
+    # 主程序通过容器内网访问；如需本机调试可取消注释
+    # ports:
+    #   - "127.0.0.1:8082:8082"
 
   app:
     build: .
@@ -48,7 +53,37 @@ services:
     ports:
       - "127.0.0.1:18080:18080"
 
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    restart: unless-stopped
+    environment:
+      - NAPCAT_UID=${NAPCAT_UID:-0}
+      - NAPCAT_GID=${NAPCAT_GID:-0}
+    ports:
+      - "6099:6099"   # WebUI（登录/管理；公网环境请勿暴露）
+      - "3001:3001"   # OneBot WebSocket（供宿主机 NoneBot2 或调试）
+    volumes:
+      - napcat-qq:/app/.config/QQ
+      - napcat-config:/app/napcat/config
+
+  nonebot2:
+    build: ./nonebot-plugin
+    restart: unless-stopped
+    depends_on:
+      - app
+      - napcat
+    environment:
+      DRIVER: ~fastapi+~websockets+~httpx
+      HOST: 0.0.0.0
+      PORT: 8081
+      ONEBOT_WS_URLS: '["ws://napcat:3001"]'
+      TQB_API_BASE: http://app:18080
+      TQB_API_TOKEN: ${API_TOKEN:-}
+      TQB_NOTIFY_GROUP: ${QQ_GROUP_IDS:-}
+
 volumes:
   tweettoaster-cache:
   app-data:
   app-cache:
+  napcat-qq:
+  napcat-config:

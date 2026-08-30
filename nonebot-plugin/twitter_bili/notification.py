@@ -22,7 +22,9 @@ async def _send_notification(bot: Bot, notification: dict) -> None:
         segments.append(MessageSegment.image(f"file:///{notification['screenshotPath'].replace(chr(92), '/')}"))
     for thumb in notification.get("videoThumbnails") or []:
         segments.append(MessageSegment.image(f"file:///{thumb.replace(chr(92), '/')}"))
-    await bot.send_group_msg(group_id=int(config.tqb_notify_group), message=segments)
+    # 支持逗号分隔多个群：取第一个（TQB_NOTIFY_GROUP 可能与 QQ_GROUP_IDS 同源）
+    group_id = int(config.tqb_notify_group.split(",")[0].strip())
+    await bot.send_group_msg(group_id=group_id, message=segments)
 
 
 async def _poll_loop(bot: Bot) -> None:
