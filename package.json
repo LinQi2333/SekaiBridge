@@ -1,8 +1,8 @@
 {
-  "name": "twitter-qq-bilibili",
-  "version": "0.1.0",
+  "name": "sekai-bridge",
+  "version": "1.0.0",
   "private": true,
-  "description": "Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统 (MVP)",
+  "description": "SekaiBridge（世界桥）：PJSK 推文搬运——Twitter/X → QQ 翻译协作 → Bilibili 动态发布",
   "type": "module",
   "engines": {
     "node": ">=22"

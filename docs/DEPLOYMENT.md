@@ -1,6 +1,6 @@
-# 部署说明书
+# SekaiBridge（世界桥）部署说明书
 
-Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统（MVP）
+PJSK 推文搬运：Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统（Linux / Docker）
 
 适用版本：Phase 1-10（`twitter_qq_bilibili_solution_v0.3.md` 全部实现）
 

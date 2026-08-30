@@ -1,19 +1,11 @@
-# Twitter/X → QQ 翻译协作 → Bilibili 动态发布系统（规格 §58）
-#
+# SekaiBridge（世界桥）—— PJSK 推文搬运：Twitter/X → QQ 翻译协作 → Bilibili 动态发布
 # Linux / Docker 一键部署（推荐）：
-#   docker compose up -d --build
+#   ./start.sh
 #   docker compose logs -f napcat     # 查看 WebUI token
 #   浏览器打开 http://<服务器IP>:6099/webui → 扫码登录机器人 QQ
 #   （如 3001 未监听：WebUI 网络配置中新建 WebSocket 服务，端口 3001）
-#
-# 服务：
-#   tweettoaster  Twitter 数据 + 截图渲染（官方镜像）
-#   app           主程序（监听 / HTTP API :18080 / 发布）
-#   napcat        NapCat Linux（内置 Linux QQ 无头版，OneBot WS :3001 + WebUI :6099）
-#   nonebot2      QQ 命令 + 通知轮询（本仓库 nonebot-plugin/）
-#
-# 敏感配置通过 .env 传入：BILI_SESSDATA / BILI_JCT / BILI_DEDEUSERID /
-#   QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
+
+name: sekai-bridge
 
 services:
   tweettoaster:
@@ -27,6 +19,7 @@ services:
     #   - "127.0.0.1:8082:8082"
 
   app:
+    image: sekai-bridge/app
     build: .
     restart: unless-stopped
     depends_on:
@@ -67,6 +60,7 @@ services:
       - napcat-config:/app/napcat/config
 
   nonebot2:
+    image: sekai-bridge/nonebot2
     build: ./nonebot-plugin
     restart: unless-stopped
     depends_on:
