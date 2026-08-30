@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { createApiServer } from './api/server.js';
 import { loadConfigFromEnv } from './config/config.js';
 import { AppDatabase } from './db/database.js';
 import { createRepositories, createServices } from './services/index.js';
@@ -6,9 +7,9 @@ import { TweetToasterClient } from './tweettoaster/client.js';
 
 /**
  * 应用入口。
- * 已完成：P1 骨架、P2 TweetToaster Client、P3 Monitor。
- * 后续阶段：截图/媒体（P4）、来源检查（P5）、QQ（P6）、翻译/话题/工作流（P7）、
- * Bilibili 发布（P8）、集成测试（P9）、Docker/部署（P10）。
+ * 已完成：P1 骨架、P2 TweetToaster Client、P3 Monitor、P4 截图/媒体、
+ * P5 来源检查、P6 HTTP API（NoneBot2 方案）。
+ * 后续阶段：Bilibili 发布（P8）、完整集成测试（P9）、Docker/部署（P10）。
  */
 function main(): void {
   const config = loadConfigFromEnv();
@@ -18,7 +19,7 @@ function main(): void {
   const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl });
   const services = createServices(repos, { config, tweetToaster });
 
-  console.log('[boot] twitter-qq-bilibili (Phase 1-3)');
+  console.log('[boot] twitter-qq-bilibili (Phase 1-6)');
   console.log(`[boot] database: ${config.databasePath} (migrations: ${database.appliedVersions().join(',')})`);
   console.log(`[boot] watched accounts: ${services.watch.list().length}`);
   console.log(`[boot] tweettoaster: ${config.tweettoasterUrl}`);
@@ -31,10 +32,23 @@ function main(): void {
   services.sourceValidation.start();
   console.log('[boot] source validation started');
 
+  // 内部 HTTP API：NoneBot2（连 NapCat）与未来 Web 调用（规格 §2.2）
+  const apiServer = createApiServer({
+    services,
+    config,
+    notifications: repos.notifications,
+    messageDedupe: repos.messageDedupe,
+    tweetToaster,
+  });
+  apiServer.listen(config.apiPort, () => {
+    console.log(`[boot] api listening on http://127.0.0.1:${config.apiPort}`);
+  });
+
   const shutdown = (signal: string): void => {
     console.log(`[boot] received ${signal}, closing...`);
     services.monitor.stop();
     services.sourceValidation.stop();
+    apiServer.close();
     database.close();
     process.exit(0);
   };

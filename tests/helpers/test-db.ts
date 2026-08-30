@@ -17,11 +17,23 @@ export function createTestDb(): TestDb {
   return { app, dir, dbPath };
 }
 
-/** 关闭并删除临时目录。 */
+/** 关闭并删除临时目录（Windows 上 WAL 文件可能短暂占用，重试几次）。 */
 export function closeTestDb(t: TestDb): void {
   try {
     t.app.close();
   } finally {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      try {
+        fs.rmSync(t.dir, { recursive: true, force: true });
+        return;
+      } catch {
+        // WAL/SHM 文件句柄释放有延迟，稍等重试
+        const start = Date.now();
+        while (Date.now() - start < 20) {
+          // busy wait 20ms
+        }
+      }
+    }
     fs.rmSync(t.dir, { recursive: true, force: true });
   }
 }

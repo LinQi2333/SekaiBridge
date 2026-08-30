@@ -47,6 +47,12 @@ export interface AppConfig {
 
   /** 发布模式：MVP 仅 manual。 */
   publishMode: 'manual';
+
+  /** 内部 HTTP API 监听端口（NoneBot2 / 未来 Web 调用）。 */
+  apiPort: number;
+
+  /** 内部 HTTP API 共享 token（NoneBot2 调用时通过 X-API-Token 携带；空则不校验）。 */
+  apiToken: string;
 }
 
 export type Env = Record<string, string | undefined>;
@@ -107,6 +113,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliJct: env.BILI_JCT ?? '',
     biliDedeuserid: env.BILI_DEDEUSERID ?? '',
     publishMode,
+    apiPort: parseIntStrict(env.API_PORT, 3100, 'API_PORT'),
+    apiToken: env.API_TOKEN ?? '',
   };
 }
 

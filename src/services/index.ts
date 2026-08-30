@@ -7,6 +7,7 @@ import { WatchRepository } from '../repositories/watch-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { PublishRepository } from '../repositories/publish-repository.js';
 import { MessageDedupeRepository } from '../repositories/message-dedupe-repository.js';
+import { NotificationRepository } from '../repositories/notification-repository.js';
 import type { TweetToasterClient } from '../tweettoaster/client.js';
 import { SqliteWatchService, type WatchService } from './watch-service.js';
 import { SqliteTranslationService, type TranslationService } from './translation-service.js';
@@ -61,6 +62,7 @@ export interface Repositories {
   topics: TopicRepository;
   publish: PublishRepository;
   messageDedupe: MessageDedupeRepository;
+  notifications: NotificationRepository;
 }
 
 export function createRepositories(db: Database.Database): Repositories {
@@ -71,6 +73,7 @@ export function createRepositories(db: Database.Database): Repositories {
     topics: new TopicRepository(db),
     publish: new PublishRepository(db),
     messageDedupe: new MessageDedupeRepository(db),
+    notifications: new NotificationRepository(db),
   };
 }
 
@@ -78,8 +81,10 @@ export function createRepositories(db: Database.Database): Repositories {
 export interface ServiceDeps {
   config: AppConfig;
   tweetToaster: TweetToasterClient;
-  /** 增量新推文回调（Phase 6 在此发送 QQ 通知）；不传则默认走 newTweetProcessor。 */
+  /** 增量新推文回调（NoneBot2 通知由默认处理器生成）；不传则默认走 newTweetProcessor。 */
   onNewTweets?: (tweets: import('../domain/tweet.js').Tweet[]) => void;
+  /** 发布服务注入（测试用）；不传使用 stub（Phase 8 实现）。 */
+  publish?: PublishService;
 }
 
 export function createServices(repos: Repositories, deps?: ServiceDeps): AppServices {
@@ -99,6 +104,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     workflow,
     screenshot,
     media,
+    notifications: repos.notifications,
   });
   const sourceValidation: SourceValidationService = deps
     ? new DefaultSourceValidationService({
@@ -123,7 +129,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     tweetQuery: new SqliteTweetQueryService(repos.tweets),
     translation: new SqliteTranslationService(repos.tweets, repos.translations, workflow),
     topic: new SqliteTopicService(repos.topics, repos.tweets),
-    publish: new StubPublishService(),
+    publish: deps?.publish ?? new StubPublishService(),
     workflow,
     monitor,
     sourceValidation,

@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkflowStatus } from '../../src/domain/workflow.js';
+import { NotificationRepository } from '../../src/repositories/notification-repository.js';
 import { TweetRepository } from '../../src/repositories/tweet-repository.js';
 import { DefaultNewTweetProcessor } from '../../src/services/tweet-processor.js';
 import { SqliteWorkflowService } from '../../src/services/workflow-service.js';
@@ -15,7 +16,7 @@ afterEach(() => {
   }
 });
 
-function setup() {
+function setup(extra: { notifications?: boolean } = {}) {
   testDb = createTestDb();
   const tweets = new TweetRepository(testDb.app.db);
   const workflow = new SqliteWorkflowService(tweets);
@@ -24,10 +25,11 @@ function setup() {
   };
   const media = {
     cachePhotos: vi.fn(async () => ['cache/twitter-photos/1/0.jpg']),
-    cacheVideoThumbnails: vi.fn(async () => []),
+    cacheVideoThumbnails: vi.fn(async () => ['cache/video-thumbnails/1/0.jpg']),
   };
-  const processor = new DefaultNewTweetProcessor({ tweets, workflow, screenshot, media });
-  return { tweets, workflow, screenshot, media, processor };
+  const notifications = extra.notifications ? new NotificationRepository(testDb.app.db) : undefined;
+  const processor = new DefaultNewTweetProcessor({ tweets, workflow, screenshot, media, notifications });
+  return { tweets, workflow, screenshot, media, notifications, processor };
 }
 
 describe('DefaultNewTweetProcessor（规格 §1 流程）', () => {
@@ -86,5 +88,36 @@ describe('DefaultNewTweetProcessor（规格 §1 流程）', () => {
 
     expect(tweets.findById(bad.id)?.workflowStatus).toBe(WorkflowStatus.DETECTED);
     expect(tweets.findById(good.id)?.workflowStatus).toBe(WorkflowStatus.SCREENSHOT_READY);
+  });
+
+  it('生成 QQ 通知记录：含截图路径与视频封面（§42）', async () => {
+    const { tweets, notifications, processor } = setup({ notifications: true });
+    const tweet = tweets.create(
+      tweetInput({
+        xTweetId: '100',
+        media: [{ type: 'video', url: 'https://pbs.twimg.com/cover.jpg', thumbnail_url: 'https://pbs.twimg.com/cover.jpg' }],
+      }),
+    );
+
+    await processor.process([tweet]);
+
+    const pending = notifications!.listPending();
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.screenshotPath).toBe('cache/screenshots/1.png');
+    expect(pending[0]?.videoThumbnails).toEqual(['cache/video-thumbnails/1/0.jpg']);
+    // 通知文本（§42/§51）：不含原文正文，含本地编号与视频提示
+    expect(pending[0]?.text).toContain('【新推文 #1】');
+    expect(pending[0]?.text).toContain('⚠️ 此推文包含视频。');
+    expect(pending[0]?.text).not.toContain('頑張る');
+  });
+
+  it('截图失败时不生成通知', async () => {
+    const { tweets, screenshot, notifications, processor } = setup({ notifications: true });
+    screenshot.render.mockRejectedValue(new Error('失败'));
+    const tweet = tweets.create(tweetInput({ xTweetId: '100' }));
+
+    await processor.process([tweet]);
+
+    expect(notifications!.listPending()).toHaveLength(0);
   });
 });

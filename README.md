@@ -2,49 +2,81 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 5（SOURCE_DELETED 来源检查）
+## 当前状态：Phase 6（HTTP API，NoneBot2 方案）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
-- [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制
-- [x] Domain 模型（tweet / translation / topic / publish / workflow）
+- [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制（v1 init / v2 notifications）
+- [x] Domain 模型（tweet / translation / topic / publish / workflow / notification）
 - [x] Repository 层
 - [x] Services 接口 + 核心服务实现
 - [x] TweetToaster 客户端（`src/tweettoaster/`）
 - [x] Monitor 监听（`SqliteMonitorService`）
 - [x] 截图与媒体（Phase 4）
-- [x] SOURCE_DELETED 来源检查（Phase 5，`DefaultSourceValidationService`）
-  - 只信单推明确 404 / tombstone / not found，不因"不在 timeline"判定（§12）
-  - 按 `SOURCE_CHECK_INTERVAL` 周期检查处理中的推文；`/查看` 可手动刷新
-  - 网络错误不标记删除；删除后本地数据全保留、状态双维度并存（§13）
-  - 已通过 §50 Case A/B/C/D 测试
-- [x] 单元测试 / 集成测试（107 个用例）
+- [x] SOURCE_DELETED 来源检查（Phase 5）
+- [x] HTTP API（Phase 6，NoneBot2 方案）
+  - 鉴权（`X-API-Token`）+ 权限（管理员/成员/群白名单，§41）
+  - `/监听 /列表 /查看 /翻译 /话题 /发布 /重试` 全部端点（`src/api/server.ts`）
+  - QQ 新推文通知队列（§42）+ NoneBot2 轮询拉取 / ack
+  - QQ 消息去重（§43）、健康检查（§57）
+  - 展示格式化纯函数（§42/§27/§51：绝不输出原文正文）
+- [x] 单元测试 / 集成测试（135 个用例）
 
 ## 快速开始
 
 ```bash
 npm install
 cp .env.example .env        # 按需修改
-npm run dev                 # tsx 运行 src/index.ts
+npm run dev                 # tsx 运行 src/index.ts（含 HTTP API）
 npm test                    # vitest 运行测试
 npm run typecheck           # tsc --noEmit
 npm run build               # 编译到 dist/
 ```
 
+## 架构（NoneBot2 方案）
+
+```text
+Twitter/X → TweetToaster（数据 + 截图渲染）
+                     ↓
+            Node 主程序（本仓库）
+              Monitor / 截图 / 媒体 / 来源检查 / 翻译 / 话题 / 发布
+              HTTP API（:3080） + SQLite + 通知队列
+                     ↑
+         NoneBot2（Python，连 NapCat）——QQ 消息收发
+             群成员 /翻译、/发布 等命令 → NoneBot2 插件 → HTTP API
+```
+
+QQ 层（NoneBot2）只做消息收发、命令解析、结果展示；
+业务全部在 Node 的 Services 层，未来 Web 端复用同一套 API 与 Services。
+
+## NoneBot2 插件接入
+
+1. 配置 `.env`：`API_PORT`、`API_TOKEN`（与插件一致）、`QQ_GROUP_IDS`、`QQ_ADMIN_IDS`。
+2. 每个请求带请求头：`X-API-Token`、`X-QQ-User`（QQ 号）、`X-QQ-Group`（群号）。
+3. 新推文通知：轮询 `GET /api/notifications`，逐条发送（文本 + `screenshotPath` 图片
+   + `videoThumbnails` 视频封面），成功后 `POST /api/notifications/:id/ack`。
+4. 消息去重：处理命令前调用 `POST /api/messages/dedupe {message_id}`，返回
+   `duplicate: true` 时直接忽略该条（§43）。
+5. 命令与端点的对应见 `src/api/README.md`；`/查看` 的展示文本由 API 返回
+   `format.view`，截图图片读取 `screenshotPath`（Node 与 NoneBot2 共享文件系统，
+   或通过 `GET /api/tweets/:id` 返回的路径自行传输）。
+
 ## 目录
 
 ```text
 src/
-  config/      环境配置
-  db/          SQLite + migrations
-  domain/      领域模型与状态机
+  config/       环境配置
+  db/           SQLite + migrations
+  domain/       领域模型与状态机
   repositories/ 数据访问
-  services/    Application Services（QQ 与未来 Web 共用）
-  qq/          后续阶段：QQ / OneBot
-  bilibili/    后续阶段：Bilibili 客户端
-  api/         预留 HTTP API 说明
-tests/         单元 / 集成测试
-data/          SQLite 文件（app.db）
-cache/         截图 / 原始图片 / 视频封面缓存
+  services/     Application Services（QQ 与未来 Web 共用）
+  qq/           QQ 权限与展示格式化（纯函数，NoneBot2 参考实现）
+  tweettoaster/ TweetToaster 客户端与标准化
+  media/        安全下载
+  api/          HTTP API 服务
+  bilibili/     后续阶段：Bilibili 客户端
+tests/          单元 / 集成测试
+data/           SQLite 文件（app.db）
+cache/          截图 / 原始图片 / 视频封面缓存
 ```
 
 ## 核心约定
@@ -61,4 +93,5 @@ cache/         截图 / 原始图片 / 视频封面缓存
 ## 开发阶段
 
 见规格 §62：P1 骨架 → P2 TweetToaster → P3 Monitor → P4 截图/媒体 →
-P5 来源检查 → P6 QQ → P7 翻译/话题/工作流 → P8 Bilibili → P9 集成测试 → P10 Docker/部署。
+P5 来源检查 → P6 QQ（本阶段按 NoneBot2 方案交付 HTTP API）→
+P7 翻译/话题/工作流 → P8 Bilibili → P9 集成测试 → P10 Docker/部署。
