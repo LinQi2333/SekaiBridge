@@ -2,26 +2,34 @@ import 'dotenv/config';
 import { loadConfigFromEnv } from './config/config.js';
 import { AppDatabase } from './db/database.js';
 import { createRepositories, createServices } from './services/index.js';
+import { TweetToasterClient } from './tweettoaster/client.js';
 
 /**
- * 应用入口（Phase 1：项目骨架）。
- * 后续阶段依次接入 TweetToaster（P2）、Monitor（P3）、截图与媒体（P4）、
- * 来源检查（P5）、QQ（P6）、翻译/话题/工作流（P7）、Bilibili 发布（P8）。
+ * 应用入口。
+ * 已完成：P1 骨架、P2 TweetToaster Client、P3 Monitor。
+ * 后续阶段：截图/媒体（P4）、来源检查（P5）、QQ（P6）、翻译/话题/工作流（P7）、
+ * Bilibili 发布（P8）、集成测试（P9）、Docker/部署（P10）。
  */
 function main(): void {
   const config = loadConfigFromEnv();
   const database = new AppDatabase({ path: config.databasePath });
 
   const repos = createRepositories(database.db);
-  const services = createServices(repos);
+  const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl });
+  const services = createServices(repos, { config, tweetToaster });
 
-  console.log('[boot] twitter-qq-bilibili Phase 1 scaffold');
+  console.log('[boot] twitter-qq-bilibili (Phase 1-3)');
   console.log(`[boot] database: ${config.databasePath} (migrations: ${database.appliedVersions().join(',')})`);
   console.log(`[boot] watched accounts: ${services.watch.list().length}`);
-  console.log('[boot] ready. 后续阶段: TweetToaster(P2) Monitor(P3) 截图/媒体(P4) 来源检查(P5) QQ(P6) 翻译/话题/工作流(P7) Bilibili(P8)');
+  console.log(`[boot] tweettoaster: ${config.tweettoasterUrl}`);
+
+  // 监听循环：0 个账户时 Monitor Idle，应用保持运行（规格 §5）
+  services.monitor.start();
+  console.log('[boot] monitor started');
 
   const shutdown = (signal: string): void => {
     console.log(`[boot] received ${signal}, closing...`);
+    services.monitor.stop();
     database.close();
     process.exit(0);
   };

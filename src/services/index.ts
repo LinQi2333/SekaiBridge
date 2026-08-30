@@ -1,17 +1,21 @@
 import type Database from 'better-sqlite3';
+import type { AppConfig } from '../config/config.js';
 import { TweetRepository } from '../repositories/tweet-repository.js';
 import { TranslationRepository } from '../repositories/translation-repository.js';
 import { WatchRepository } from '../repositories/watch-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { PublishRepository } from '../repositories/publish-repository.js';
 import { MessageDedupeRepository } from '../repositories/message-dedupe-repository.js';
+import type { TweetToasterClient } from '../tweettoaster/client.js';
 import { SqliteWatchService, type WatchService } from './watch-service.js';
 import { SqliteTranslationService, type TranslationService } from './translation-service.js';
 import { SqliteTopicService, type TopicService } from './topic-service.js';
 import { SqliteTweetQueryService, type TweetQueryService } from './tweet-query-service.js';
 import { SqliteWorkflowService, type WorkflowService } from './workflow-service.js';
 import {
+  SqliteMonitorService,
   StubMonitorService,
+  type MonitorPollResult,
   type MonitorService,
 } from './monitor-service.js';
 import {
@@ -59,8 +63,25 @@ export function createRepositories(db: Database.Database): Repositories {
   };
 }
 
-export function createServices(repos: Repositories): AppServices {
+/** 创建真实 Monitor 等外部依赖所需的环境（不传则使用 stub）。 */
+export interface ServiceDeps {
+  config: AppConfig;
+  tweetToaster: TweetToasterClient;
+  /** 增量新推文回调（Phase 6 在此发送 QQ 通知）。 */
+  onNewTweets?: (tweets: import('../domain/tweet.js').Tweet[]) => void;
+}
+
+export function createServices(repos: Repositories, deps?: ServiceDeps): AppServices {
   const workflow = new SqliteWorkflowService(repos.tweets);
+  const monitor: MonitorService = deps
+    ? new SqliteMonitorService({
+        watch: repos.watch,
+        tweets: repos.tweets,
+        tweetToaster: deps.tweetToaster,
+        pollIntervalMs: deps.config.twitterPollInterval * 1000,
+        onNewTweets: deps.onNewTweets,
+      })
+    : new StubMonitorService();
   return {
     watch: new SqliteWatchService(repos.watch),
     tweetQuery: new SqliteTweetQueryService(repos.tweets),
@@ -68,13 +89,14 @@ export function createServices(repos: Repositories): AppServices {
     topic: new SqliteTopicService(repos.topics, repos.tweets),
     publish: new StubPublishService(),
     workflow,
-    monitor: new StubMonitorService(),
+    monitor,
     sourceValidation: new StubSourceValidationService(),
     screenshot: new StubScreenshotService(),
     media: new StubMediaService(),
   };
 }
 
+export { SqliteMonitorService } from './monitor-service.js';
 export type {
   WatchService,
   TranslationService,
@@ -82,6 +104,7 @@ export type {
   TweetQueryService,
   WorkflowService,
   MonitorService,
+  MonitorPollResult,
   SourceValidationService,
   ScreenshotService,
   MediaService,

@@ -2,7 +2,7 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 2（TweetToaster Client）
+## 当前状态：Phase 3（Monitor 监听）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
 - [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制
@@ -10,12 +10,12 @@
 - [x] Repository 层
 - [x] Services 接口 + 核心服务实现
 - [x] TweetToaster 客户端（`src/tweettoaster/`）
-  - `POST /api/tweet`：单推 / 主页 / timeline 数据获取
-  - `POST /api/render` + `/api/auto`：任务提交与轮询，返回截图 URL
-  - `GET /api/get_task=<id>`、`GET /api/health`
-  - 媒体标准化：photo / video / gif，video url 即默认封面（TweetToaster 行为）
-  - 404 / tombstone → `TweetNotFoundError`（Phase 5 SOURCE_DELETED 信号）
-- [x] 单元测试 / 集成测试（69 个用例）
+- [x] Monitor 监听（`SqliteMonitorService`）
+  - 0 / 1 / N 个账户轮询，每账户 ±10s jitter（规格 §6）
+  - bootstrap `latest_only`：首次读取只入库、标记完成、不发送通知（规格 §7）
+  - 增量检测：x_tweet_id 数据库去重 + `onNewTweets` 回调（Phase 6 接 QQ 通知）
+  - 错误韧性：单账户失败不影响其他账户
+- [x] 单元测试 / 集成测试（79 个用例）
 
 ## 快速开始
 
