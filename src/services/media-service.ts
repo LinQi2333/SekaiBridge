@@ -2,7 +2,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Tweet } from '../domain/tweet.js';
 import { parseMedia, photoMedia } from '../domain/tweet.js';
-import { EXT_BY_CONTENT_TYPE, safeDownload, type SafeDownloadOptions } from '../media/safe-download.js';
+import { EXT_BY_CONTENT_TYPE, safeDownload } from '../media/safe-download.js';
+import type { MediaFetcher } from '../media/media-fetcher.js';
 import type { TweetRepository } from '../repositories/tweet-repository.js';
 import { NotImplementedError, NotFoundError } from './errors.js';
 
@@ -26,17 +27,26 @@ export interface MediaServiceOptions {
   /** 缓存根目录（cacheRoot）。 */
   cacheRoot: string;
   fetchImpl?: typeof fetch;
+  /** 媒体获取策略（默认直连 safeDownload；容器接线时走 TweetToaster 代理）。 */
+  fetcher?: MediaFetcher;
 }
 
 export class DefaultMediaService implements MediaService {
   private readonly tweets: TweetRepository;
   private readonly cacheRoot: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly fetcher: MediaFetcher;
 
   constructor(options: MediaServiceOptions) {
     this.tweets = options.tweets;
     this.cacheRoot = options.cacheRoot;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
+    this.fetcher =
+      options.fetcher ??
+      (async (url) => {
+        const result = await safeDownload(url, { fetchImpl: this.fetchImpl });
+        return { bytes: result.bytes, contentType: result.contentType };
+      });
   }
 
   async cachePhotos(tweetId: number): Promise<string[]> {
@@ -72,11 +82,10 @@ export class DefaultMediaService implements MediaService {
     const dir = path.join(this.cacheRoot, subdir, String(tweet.id));
     await fs.mkdir(dir, { recursive: true });
 
-    const options: SafeDownloadOptions = { fetchImpl: this.fetchImpl };
     const paths: string[] = [];
     for (const [index, item] of media.entries()) {
       if (!item.url) continue;
-      const { bytes, contentType } = await safeDownload(item.url, options);
+      const { bytes, contentType } = await this.fetcher(item.url);
       const ext = EXT_BY_CONTENT_TYPE[contentType] ?? 'img';
       const filePath = path.join(dir, `${index}.${ext}`);
       await fs.writeFile(filePath, bytes);

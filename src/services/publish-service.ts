@@ -5,6 +5,7 @@ import { PublishStatus, type PublishRecord } from '../domain/publish.js';
 import { photoMedia } from '../domain/tweet.js';
 import { WorkflowStatus } from '../domain/workflow.js';
 import { EXT_BY_CONTENT_TYPE, safeDownload } from '../media/safe-download.js';
+import type { MediaFetcher } from '../media/media-fetcher.js';
 import { PublishRepository } from '../repositories/publish-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { TranslationRepository } from '../repositories/translation-repository.js';
@@ -41,6 +42,8 @@ export interface DefaultPublishServiceOptions {
   dynamicPublisher: DynamicPublisher;
   /** 发布时下载 Twitter 原图用（测试注入 mock fetch）。 */
   fetchImpl?: typeof fetch;
+  /** 媒体获取策略（默认直连 safeDownload；容器接线时走 TweetToaster 代理）。 */
+  fetcher?: MediaFetcher;
 }
 
 export class DefaultPublishService implements PublishService {
@@ -52,6 +55,7 @@ export class DefaultPublishService implements PublishService {
   private readonly imageUploader: ImageUploader;
   private readonly dynamicPublisher: DynamicPublisher;
   private readonly fetchImpl: typeof fetch;
+  private readonly fetcher: MediaFetcher;
 
   constructor(options: DefaultPublishServiceOptions) {
     this.tweets = options.tweets;
@@ -62,6 +66,12 @@ export class DefaultPublishService implements PublishService {
     this.imageUploader = options.imageUploader;
     this.dynamicPublisher = options.dynamicPublisher;
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
+    this.fetcher =
+      options.fetcher ??
+      (async (url) => {
+        const result = await safeDownload(url, { fetchImpl: this.fetchImpl });
+        return { bytes: result.bytes, contentType: result.contentType };
+      });
   }
 
   async publish(tweetId: number, topicAlias?: string): Promise<PublishResult> {
@@ -105,9 +115,7 @@ export class DefaultPublishService implements PublishService {
       const photos = photoMedia(tweet);
       const pics: string[] = [];
       for (const photo of photos) {
-        const { bytes, contentType } = await safeDownload(photo.url, {
-          fetchImpl: this.fetchImpl,
-        });
+        const { bytes, contentType } = await this.fetcher(photo.url);
         const filename = filenameForPhoto(photo.url, contentType);
         const imageUrl = await this.imageUploader.uploadImage(bytes, filename);
         pics.push(imageUrl);

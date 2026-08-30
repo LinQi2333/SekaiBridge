@@ -190,4 +190,29 @@ describe('TweetToasterClient', () => {
     });
     await expect(down.health()).resolves.toBeNull();
   });
+
+  it('downloadMedia：通过 /api/media 代理下载图片（国内环境直连 Twitter CDN 失败时）', async () => {
+    const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+    const fetchImpl = mockFetch({
+      '/api/media': () =>
+        new Response(jpeg, { status: 200, headers: { 'content-type': 'image/jpeg' } }),
+    });
+    const client = new TweetToasterClient({ baseUrl: BASE, fetchImpl });
+
+    const result = await client.downloadMedia('https://pbs.twimg.com/media/a.jpg');
+    expect(result.bytes).toEqual(jpeg);
+    expect(result.contentType).toBe('image/jpeg');
+    // URL 被编码进 query
+    const callUrl = String(fetchImpl.mock.calls[0]?.[0]);
+    expect(callUrl).toContain('/api/media?url=');
+    expect(decodeURIComponent(callUrl)).toContain('https://pbs.twimg.com/media/a.jpg');
+  });
+
+  it('downloadMedia：代理返回非 200 抛 TweetToasterError', async () => {
+    const fetchImpl = mockFetch({ '/api/media': () => new Response('nf', { status: 404 }) });
+    const client = new TweetToasterClient({ baseUrl: BASE, fetchImpl });
+    await expect(client.downloadMedia('https://pbs.twimg.com/x.jpg')).rejects.toBeInstanceOf(
+      TweetToasterError,
+    );
+  });
 });

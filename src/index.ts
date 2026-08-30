@@ -5,6 +5,7 @@ import { BilibiliDynamicPublisher } from './bilibili/dynamic-publisher.js';
 import { BilibiliImageUploader } from './bilibili/image-upload.js';
 import { loadConfigFromEnv } from './config/config.js';
 import { AppDatabase } from './db/database.js';
+import { createProxyFetch } from './media/proxy-fetch.js';
 import { createRepositories, createServices } from './services/index.js';
 import { TweetToasterClient } from './tweettoaster/client.js';
 
@@ -19,17 +20,21 @@ function main(): void {
   const database = new AppDatabase({ path: config.databasePath });
 
   const repos = createRepositories(database.db);
-  const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl });
+  // 支持 HTTPS_PROXY 的 fetch（国内环境访问 Twitter CDN 需要代理）
+  const fetchImpl = createProxyFetch();
+  const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl, fetchImpl });
   const biliClient = new BilibiliClient({
     cookie: {
       sessdata: config.biliSessdata,
       jct: config.biliJct,
       dedeuserid: config.biliDedeuserid,
     },
+    fetchImpl,
   });
   const services = createServices(repos, {
     config,
     tweetToaster,
+    fetchImpl,
     bilibili: {
       imageUploader: new BilibiliImageUploader(biliClient),
       dynamicPublisher: new BilibiliDynamicPublisher(biliClient),

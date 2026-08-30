@@ -3,6 +3,7 @@ import {
   TweetToasterError,
   TweetToasterUnavailableError,
 } from './errors.js';
+import { normalizeContentType } from '../media/safe-download.js';
 import type {
   ToasterHealthResponse,
   ToasterTaskResponse,
@@ -115,10 +116,39 @@ export class TweetToasterClient {
     return `${this.baseUrl}/cache/${task.result}`;
   }
 
-  /** GET /api/get_task=<id>。 */
+  /** GET /api/task=<id>。 */
   async getTask(taskId: string): Promise<ToasterTaskResponse> {
     const payload = await this.#request(`/api/get_task=${encodeURIComponent(taskId)}`);
     return payload as ToasterTaskResponse;
+  }
+
+  /**
+   * 通过 TweetToaster 的图片代理下载远程图片（GET /api/media?url=）。
+   * 用于主程序无法直连 Twitter CDN（pbs.twimg.com 等）的部署环境。
+   */
+  async downloadMedia(url: string): Promise<{ bytes: Buffer; contentType: string }> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/api/media?url=${encodeURIComponent(url)}`,
+        { signal: controller.signal },
+      );
+    } catch (error) {
+      const timedOut = error instanceof Error && error.name === 'AbortError';
+      throw new TweetToasterUnavailableError(
+        timedOut ? `媒体代理请求超时: ${truncate(url, 200)}` : `媒体代理请求失败: ${truncate(url, 200)}`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!response.ok) {
+      throw new TweetToasterError(`媒体代理返回 HTTP ${response.status}: ${truncate(url, 200)}`);
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const contentType = normalizeContentType(response.headers.get('content-type'));
+    return { bytes, contentType };
   }
 
   /** 轮询任务直到 SUCCESS / FAILURE，成功返回最终任务。 */
@@ -193,6 +223,10 @@ export class TweetToasterClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function truncate(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
 export type { ToasterTaskState };

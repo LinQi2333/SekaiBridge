@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type Database from 'better-sqlite3';
 import type { AppConfig } from '../config/config.js';
+import { createMediaFetcher } from '../media/media-fetcher.js';
 import { TweetRepository } from '../repositories/tweet-repository.js';
 import { TranslationRepository } from '../repositories/translation-repository.js';
 import { WatchRepository } from '../repositories/watch-repository.js';
@@ -103,6 +104,8 @@ export interface ServiceDeps {
 export function createServices(repos: Repositories, deps?: ServiceDeps): AppServices {
   const workflow = new SqliteWorkflowService(repos.tweets);
   const fetchImpl = deps?.fetchImpl ?? globalThis.fetch;
+  // 媒体获取策略：Twitter 图片走 TweetToaster /api/media 代理，其余直连（§48 安全约束）
+  const mediaFetcher = createMediaFetcher(deps?.tweetToaster, { fetchImpl });
   const screenshot: ScreenshotService = deps
     ? new DefaultScreenshotService({
         tweets: repos.tweets,
@@ -112,7 +115,12 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
       })
     : new StubScreenshotService();
   const media: MediaService = deps
-    ? new DefaultMediaService({ tweets: repos.tweets, cacheRoot: deps.config.cacheRoot, fetchImpl })
+    ? new DefaultMediaService({
+        tweets: repos.tweets,
+        cacheRoot: deps.config.cacheRoot,
+        fetchImpl,
+        fetcher: mediaFetcher,
+      })
     : new StubMediaService();
   const newTweetProcessor = new DefaultNewTweetProcessor({
     tweets: repos.tweets,
@@ -151,6 +159,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
           imageUploader: deps.bilibili.imageUploader,
           dynamicPublisher: deps.bilibili.dynamicPublisher,
           fetchImpl,
+          fetcher: mediaFetcher,
         })
       : new StubPublishService());
 
