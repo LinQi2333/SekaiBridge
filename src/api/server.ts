@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from '../bilibili/errors.js';
 import type { AppConfig } from '../config/config.js';
 import { formatTweetView } from '../qq/format.js';
 import { checkPermission, type QqIdentity, type QqPermission } from '../qq/permission.js';
@@ -138,6 +139,14 @@ export function createApiServer(options: ApiServerOptions): http.Server {
     }
     if (error instanceof IllegalTransitionError) {
       sendJson(res, 409, { ok: false, error: { code: 'ILLEGAL_STATE', message: error.message } });
+      return;
+    }
+    if (error instanceof BilibiliAuthError) {
+      sendJson(res, 401, { ok: false, error: { code: 'BILIBILI_AUTH', message: error.message } });
+      return;
+    }
+    if (error instanceof BilibiliApiError || error instanceof BilibiliNetworkError) {
+      sendJson(res, 502, { ok: false, error: { code: 'BILIBILI_ERROR', message: error.message } });
       return;
     }
     if (error instanceof NotImplementedError) {

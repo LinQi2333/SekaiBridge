@@ -2,7 +2,7 @@
 
 > 完整实施规格见 `twitter_qq_bilibili_solution_v0.3.md`。
 
-## 当前状态：Phase 6（HTTP API，NoneBot2 方案）
+## 当前状态：Phase 8（Bilibili 发布）
 
 - [x] TypeScript 工程脚手架（ESM，Node.js 22+）
 - [x] SQLite（WAL、foreign_keys=ON）+ 迁移机制（v1 init / v2 notifications）
@@ -14,12 +14,14 @@
 - [x] 截图与媒体（Phase 4）
 - [x] SOURCE_DELETED 来源检查（Phase 5）
 - [x] HTTP API（Phase 6，NoneBot2 方案）
-  - 鉴权（`X-API-Token`）+ 权限（管理员/成员/群白名单，§41）
-  - `/监听 /列表 /查看 /翻译 /话题 /发布 /重试` 全部端点（`src/api/server.ts`）
-  - QQ 新推文通知队列（§42）+ NoneBot2 轮询拉取 / ack
-  - QQ 消息去重（§43）、健康检查（§57）
-  - 展示格式化纯函数（§42/§27/§51：绝不输出原文正文）
-- [x] 单元测试 / 集成测试（135 个用例）
+- [x] 翻译版本 / 话题 / 工作流（Phase 7，含 §30 回复与 §32 话题列表展示）
+- [x] Bilibili 发布（Phase 8，`DefaultPublishService` + `src/bilibili/`）
+  - wbi 签名客户端（`BilibiliClient`）：图片上传、动态发布、Cookie 认证
+  - 登录失效识别（§54-18）：code -101/-111/-352/-412 → `BilibiliAuthError`
+  - 只上传 photo（§21/§53），视频与封面永不进入 `pics[]`；视频-only 发纯文本动态（§22）
+  - 幂等发布（§38）：已 SUCCESS 不重复调用 Bilibili API；失败可重试（§39）
+  - 发布内容 = 最终翻译文本 + Twitter 原始图片 + 可选话题（§34）
+- [x] 单元测试 / 集成测试（158 个用例）
 
 ## 快速开始
 
@@ -39,7 +41,7 @@ Twitter/X → TweetToaster（数据 + 截图渲染）
                      ↓
             Node 主程序（本仓库）
               Monitor / 截图 / 媒体 / 来源检查 / 翻译 / 话题 / 发布
-              HTTP API（:3080） + SQLite + 通知队列
+              HTTP API（:18080） + SQLite + 通知队列
                      ↑
          NoneBot2（Python，连 NapCat）——QQ 消息收发
              群成员 /翻译、/发布 等命令 → NoneBot2 插件 → HTTP API

@@ -35,7 +35,13 @@ import {
   DefaultNewTweetProcessor,
   type NewTweetProcessor,
 } from './tweet-processor.js';
-import { StubPublishService, type PublishService } from './publish-service.js';
+import type { ImageUploader } from '../bilibili/image-upload.js';
+import type { DynamicPublisher } from '../bilibili/dynamic-publisher.js';
+import {
+  DefaultPublishService,
+  StubPublishService,
+  type PublishService,
+} from './publish-service.js';
 
 /**
  * 应用服务容器（规格 §4 / §61）。
@@ -83,8 +89,13 @@ export interface ServiceDeps {
   tweetToaster: TweetToasterClient;
   /** 增量新推文回调（NoneBot2 通知由默认处理器生成）；不传则默认走 newTweetProcessor。 */
   onNewTweets?: (tweets: import('../domain/tweet.js').Tweet[]) => void;
-  /** 发布服务注入（测试用）；不传使用 stub（Phase 8 实现）。 */
+  /** 发布服务注入（测试用）；不传则使用 stub。 */
   publish?: PublishService;
+  /** Bilibili 上传/发布器（提供后自动构造真实 PublishService）。 */
+  bilibili?: {
+    imageUploader: ImageUploader;
+    dynamicPublisher: DynamicPublisher;
+  };
 }
 
 export function createServices(repos: Repositories, deps?: ServiceDeps): AppServices {
@@ -124,12 +135,26 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
       })
     : new StubMonitorService();
 
+  const publish: PublishService =
+    deps?.publish ??
+    (deps?.bilibili
+      ? new DefaultPublishService({
+          tweets: repos.tweets,
+          translations: repos.translations,
+          topics: repos.topics,
+          publishes: repos.publish,
+          workflow,
+          imageUploader: deps.bilibili.imageUploader,
+          dynamicPublisher: deps.bilibili.dynamicPublisher,
+        })
+      : new StubPublishService());
+
   return {
     watch: new SqliteWatchService(repos.watch),
     tweetQuery: new SqliteTweetQueryService(repos.tweets),
     translation: new SqliteTranslationService(repos.tweets, repos.translations, workflow),
     topic: new SqliteTopicService(repos.topics, repos.tweets),
-    publish: deps?.publish ?? new StubPublishService(),
+    publish,
     workflow,
     monitor,
     sourceValidation,

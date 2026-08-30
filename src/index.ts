@@ -1,5 +1,8 @@
 import 'dotenv/config';
 import { createApiServer } from './api/server.js';
+import { BilibiliClient } from './bilibili/client.js';
+import { BilibiliDynamicPublisher } from './bilibili/dynamic-publisher.js';
+import { BilibiliImageUploader } from './bilibili/image-upload.js';
 import { loadConfigFromEnv } from './config/config.js';
 import { AppDatabase } from './db/database.js';
 import { createRepositories, createServices } from './services/index.js';
@@ -8,8 +11,8 @@ import { TweetToasterClient } from './tweettoaster/client.js';
 /**
  * 应用入口。
  * 已完成：P1 骨架、P2 TweetToaster Client、P3 Monitor、P4 截图/媒体、
- * P5 来源检查、P6 HTTP API（NoneBot2 方案）。
- * 后续阶段：Bilibili 发布（P8）、完整集成测试（P9）、Docker/部署（P10）。
+ * P5 来源检查、P6 HTTP API（NoneBot2 方案）、P7 翻译/话题/工作流、P8 Bilibili 发布。
+ * 后续阶段：完整集成测试（P9）、Docker/部署（P10）。
  */
 function main(): void {
   const config = loadConfigFromEnv();
@@ -17,7 +20,21 @@ function main(): void {
 
   const repos = createRepositories(database.db);
   const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl });
-  const services = createServices(repos, { config, tweetToaster });
+  const biliClient = new BilibiliClient({
+    cookie: {
+      sessdata: config.biliSessdata,
+      jct: config.biliJct,
+      dedeuserid: config.biliDedeuserid,
+    },
+  });
+  const services = createServices(repos, {
+    config,
+    tweetToaster,
+    bilibili: {
+      imageUploader: new BilibiliImageUploader(biliClient),
+      dynamicPublisher: new BilibiliDynamicPublisher(biliClient),
+    },
+  });
 
   console.log('[boot] twitter-qq-bilibili (Phase 1-6)');
   console.log(`[boot] database: ${config.databasePath} (migrations: ${database.appliedVersions().join(',')})`);

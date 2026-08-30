@@ -113,7 +113,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliJct: env.BILI_JCT ?? '',
     biliDedeuserid: env.BILI_DEDEUSERID ?? '',
     publishMode,
-    apiPort: parseIntStrict(env.API_PORT, 3100, 'API_PORT'),
+    apiPort: parseIntStrict(env.API_PORT, 18080, 'API_PORT'),
     apiToken: env.API_TOKEN ?? '',
   };
 }
