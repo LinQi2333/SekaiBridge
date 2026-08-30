@@ -103,7 +103,7 @@ export class TweetToasterClient {
       body: JSON.stringify(request),
     })) as { task_id: string };
     const task = await this.waitForTask(taskId);
-    return `${this.baseUrl}/cache/${task.result}`;
+    return screenshotUrl(this.baseUrl, task.result);
   }
 
   /** POST /api/auto（旧 Bot 兼容协议）并轮询，返回截图 PNG 的完整 URL。 */
@@ -113,7 +113,7 @@ export class TweetToasterClient {
       body: JSON.stringify(request),
     })) as { task_id: string };
     const task = await this.waitForTask(taskId);
-    return `${this.baseUrl}/cache/${task.result}`;
+    return screenshotUrl(this.baseUrl, task.result);
   }
 
   /** GET /api/task=<id>。 */
@@ -223,6 +223,15 @@ export class TweetToasterClient {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** TweetToaster 任务 result 是文件名（无扩展名），实际图片为 /cache/<result>.png。 */
+function screenshotUrl(baseUrl: string, result: string | null): string {
+  if (!result) {
+    throw new TweetToasterError('任务成功但没有结果文件');
+  }
+  const filename = result.endsWith('.png') ? result : `${result}.png`;
+  return `${baseUrl}/cache/${filename}`;
 }
 
 function truncate(value: string, max: number): string {
