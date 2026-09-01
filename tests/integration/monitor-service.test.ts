@@ -38,7 +38,6 @@ function createMonitor(
   options: {
     responder?: (screenName: string) => ToasterTweetResponse | Promise<ToasterTweetResponse>;
     onNewTweets?: (tweets: Tweet[]) => void;
-    onBootstrap?: (info: { screenName: string; imported: number; anchorTweetId: number | null }) => void;
     pollIntervalMs?: number;
     jitterMs?: number;
   } = {},
@@ -54,7 +53,6 @@ function createMonitor(
     pollIntervalMs: options.pollIntervalMs ?? 60_000,
     jitterMs: options.jitterMs ?? 0,
     onNewTweets: options.onNewTweets,
-    onBootstrap: options.onBootstrap,
   });
   return { watch, tweets, monitor, getTimeline };
 }
@@ -79,14 +77,12 @@ describe('MonitorService（规格 §5 / §6 / §7 / §8）', () => {
     expect(f.tweets.count({ filter: 'all' })).toBe(0);
   });
 
-  it('1 个账户首次监听：bootstrap 只入库不通知（规格 §7），回调报导入数', async () => {
+  it('1 个账户首次监听：bootstrap 只入库不通知（规格 §7）', async () => {
     testDb = createTestDb();
     const onNewTweets = vi.fn();
-    const onBootstrap = vi.fn();
     const f = createMonitor(testDb.app, {
       responder: async () => timelineOf('foo', ['100', '200', '300']),
       onNewTweets,
-      onBootstrap,
     });
     f.watch.create('foo');
 
@@ -96,19 +92,14 @@ describe('MonitorService（规格 §5 / §6 / §7 / §8）', () => {
       mode: 'bootstrap',
       timelineCount: 3,
       newTweets: [],
-      imported: 3,
       duplicateCount: 0,
       error: null,
     });
     // 已有推文全部入库，标记 bootstrap 完成
     expect(f.tweets.count({ filter: 'all' })).toBe(3);
     expect(f.watch.findByScreenName('foo')?.bootstrapCompleted).toBe(true);
-    // 不发送单条 QQ 通知
+    // 不发送 QQ 通知
     expect(onNewTweets).not.toHaveBeenCalled();
-    // bootstrap 完成回调：报告导入数与锚点推文 id
-    expect(onBootstrap).toHaveBeenCalledWith(
-      expect.objectContaining({ screenName: 'foo', imported: 3, anchorTweetId: expect.any(Number) }),
-    );
   });
 
   it('bootstrap 后增量检测：只上报新推文，旧推文计为重复（规格 §8）', async () => {

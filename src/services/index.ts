@@ -145,16 +145,6 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
         tweetToaster: deps.tweetToaster,
         pollIntervalMs: deps.config.twitterPollInterval * 1000,
         onNewTweets: deps.onNewTweets ?? ((tweets) => newTweetProcessor.process(tweets)),
-        // bootstrap 完成 → 生成一条"已导入历史推文"通知（NoneBot2 轮询发到群）
-        onBootstrap: async (info) => {
-          if (info.anchorTweetId === null) return;
-          repos.notifications.create({
-            tweetId: info.anchorTweetId,
-            text: `已导入最近的 ${info.imported} 条历史推文（之后 @${info.screenName} 的新推文才会通知）`,
-            screenshotPath: null,
-            videoThumbnails: [],
-          });
-        },
       })
     : new StubMonitorService();
 

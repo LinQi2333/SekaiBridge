@@ -171,14 +171,11 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     await startApi(env);
     const { repos, services, imageUploader, dynamicPublisher } = env;
 
-    // 1) 监听账户 + bootstrap：入库 + 生成一条"已导入历史推文"通知（§7 不通知单条推文）
+    // 1) 监听账户 + bootstrap：只入库、不通知（§7）
     services.watch.add('foo');
     const boot = await services.monitor.pollOnce();
     expect(boot[0]?.mode).toBe('bootstrap');
-    expect(boot[0]?.imported).toBe(2);
-    const bootNotifs = repos.notifications.listPending();
-    expect(bootNotifs).toHaveLength(1);
-    expect(bootNotifs[0]?.text).toContain('已导入最近的 2 条历史推文');
+    expect(repos.notifications.listPending()).toHaveLength(0);
     expect(repos.tweets.count({ filter: 'all' })).toBe(2);
 
     // 2) 增量：新推文 #300 自动完成 截图 → SCREENSHOT_READY → 媒体缓存 → 通知
@@ -195,21 +192,19 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
       fs.existsSync(path.join(tmpDir, 'twitter-photos', String(tweet?.id), '0.jpg')),
     ).toBe(true);
 
-    // 3) Mock QQ：拉取通知并 ack（§42）——第一条是 bootstrap 导入通知，第二条是新推文通知
+    // 3) Mock QQ：拉取通知并 ack（§42）
     const list = await api('/api/notifications', { token: TOKEN });
     const notifications = (list.json.data as { notifications: { id: number; text: string; screenshotPath: string | null }[] }).notifications;
-    expect(notifications).toHaveLength(2);
-    expect(notifications[0]?.text).toContain('已导入最近的 2 条历史推文');
-    const newNotif = notifications[1]!;
-    expect(newNotif.text).toContain('【新推文 #3】');
-    expect(newNotif.text).toContain('账号：@foo');
-    expect(newNotif.text).toContain('原推：');
-    expect(newNotif.text).not.toContain('頑張る'); // §51 不含原文
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]?.text).toContain('【新推文 #3】');
+    expect(notifications[0]?.text).toContain('账号：@foo');
+    expect(notifications[0]?.text).toContain('原推：');
+    expect(notifications[0]?.text).not.toContain('頑張る'); // §51 不含原文
     // API 返回的是按当前 cacheRoot 解析后的绝对路径
-    expect(newNotif.screenshotPath).toBe(
+    expect(notifications[0]?.screenshotPath).toBe(
       path.join(tmpDir, shotRel!.replace(/\//g, path.sep)),
     );
-    const ack = await api(`/api/notifications/${newNotif.id}/ack`, { method: 'POST', token: TOKEN });
+    const ack = await api(`/api/notifications/${notifications[0]!.id}/ack`, { method: 'POST', token: TOKEN });
     expect((ack.json.data as { acked: boolean }).acked).toBe(true);
 
     // 4) 翻译（成员，§28）：保留 emoji 与换行
@@ -289,15 +284,13 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     const tweet = repos.tweets.findById(inc[0]!.newTweets[0]!.id);
     expect(tweet?.workflowStatus).toBe(WorkflowStatus.SCREENSHOT_READY);
 
-    // 通知（§52）：第一条是 bootstrap 导入通知，第二条是新推文通知（含视频提示）
+    // 通知（§52）：含"包含视频"提示；封面已缓存
     const pending = repos.notifications.listPending();
-    expect(pending).toHaveLength(2);
-    expect(pending[0]?.text).toContain('已导入最近的');
-    const videoNotif = pending[1]!;
-    expect(videoNotif.text).toContain('⚠️ 此推文包含视频。');
-    expect(videoNotif.text).toContain('视频本体不会下载或转载');
-    expect(videoNotif.text).not.toContain('頑張る');
-    const coverRel = videoNotif.videoThumbnails[0];
+    expect(pending).toHaveLength(1);
+    expect(pending[0]?.text).toContain('⚠️ 此推文包含视频。');
+    expect(pending[0]?.text).toContain('视频本体不会下载或转载');
+    expect(pending[0]?.text).not.toContain('頑張る');
+    const coverRel = pending[0]?.videoThumbnails[0];
     expect(coverRel).toBe(`video-thumbnails/${tweet?.id}/0.jpg`);
     expect(fs.existsSync(path.join(tmpDir, coverRel!.replace(/\//g, path.sep)))).toBe(true);
 
