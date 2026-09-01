@@ -102,7 +102,7 @@ describe('MonitorService（规格 §5 / §6 / §7 / §8）', () => {
     expect(onNewTweets).not.toHaveBeenCalled();
   });
 
-  it('只导入账号自己的推文：转推/非本人推文跳过（§8），大小写不敏感', async () => {
+  it('转推也导入：时间线推文统一归属到被监听账号（转推附加文字需翻译）', async () => {
     testDb = createTestDb();
     const f = createMonitor(testDb.app, {
       responder: async () =>
@@ -110,13 +110,13 @@ describe('MonitorService（规格 §5 / §6 / §7 / §8）', () => {
           mode: 'timeline',
           query: { kind: 'profile', screenName: 'foo', canonicalUrl: 'https://x.com/foo' },
           tweets: [
-            // 转推：author 是原作者，应跳过
+            // 转推：author 是原作者，仍要导入并归属到被监听账号
             toasterStatus({
               id: '1',
               author: { ...toasterStatus().author, screenName: 'other' },
               relation: 'timeline',
             }),
-            // 大小写不同的本人推文，应入库（归一化后为 foo）
+            // 大小写不同的本人推文
             toasterStatus({
               id: '2',
               author: { ...toasterStatus().author, screenName: 'FOO' },
@@ -134,11 +134,14 @@ describe('MonitorService（规格 §5 / §6 / §7 / §8）', () => {
     f.watch.create('foo');
 
     const [result] = await f.monitor.pollOnce();
-    expect(result.timelineCount).toBe(2);
-    expect(f.tweets.count({ filter: 'all' })).toBe(2);
-    expect(f.tweets.findByXId('1')).toBeNull(); // 转推被跳过
+    expect(result.timelineCount).toBe(3);
+    expect(f.tweets.count({ filter: 'all' })).toBe(3);
+    // 全部归属到 foo，seq 连续（反转入库：新的在前 → 3 号先入 seq=1）
+    expect(f.tweets.findByXId('1')?.authorScreenName).toBe('foo');
     expect(f.tweets.findByXId('2')?.authorScreenName).toBe('foo');
     expect(f.tweets.findByXId('3')?.authorScreenName).toBe('foo');
+    expect(f.tweets.findByXId('3')?.seq).toBe(1);
+    expect(f.tweets.findByXId('1')?.seq).toBe(3);
   });
 
   it('bootstrap 后增量检测：只上报新推文，旧推文计为重复（规格 §8）', async () => {

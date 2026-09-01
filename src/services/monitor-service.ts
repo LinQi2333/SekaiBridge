@@ -117,18 +117,12 @@ export class SqliteMonitorService implements MonitorService {
     const mode: 'bootstrap' | 'incremental' = account.bootstrapCompleted ? 'incremental' : 'bootstrap';
     try {
       const response = await this.tweetToaster.getTimeline(account.screenName);
-      const allInputs = toNewTweetInputs(response);
-      // 只导入账号自己的推文：转推的 author 是原作者，跳过（搬运系统不转载他人内容）。
+      // 时间线推文统一归属到被监听账号：转推（author 为原作者）也需监听，
+      // 转推附加的文字要翻译；无附加文字的后续用空翻译兜底。原始作者保留在 raw_json。
       // 反转后再入库，使本地编号随发布时间递增（最早的 #1、最新的 #N）
-      const skipped = allInputs.filter(
-        (i) => i.authorScreenName.toLowerCase() !== account.screenName,
-      );
-      const inputs = allInputs
-        .filter((i) => i.authorScreenName.toLowerCase() === account.screenName)
+      const inputs = toNewTweetInputs(response)
+        .map((i) => ({ ...i, authorScreenName: account.screenName }))
         .reverse();
-      if (skipped.length > 0) {
-        log('tweet.retweet.skipped', `@${account.screenName} 跳过 ${skipped.length} 条转发/非本人推文`);
-      }
       const result: MonitorPollResult = {
         screenName: account.screenName,
         mode,
