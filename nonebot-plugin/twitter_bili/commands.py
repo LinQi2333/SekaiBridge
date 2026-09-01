@@ -15,6 +15,7 @@ watch = on_command("监听", priority=1)
 tweet_list = on_command("列表", priority=1)
 show = on_command("查看", priority=1)
 translate = on_command("翻译", priority=1)
+topic = on_command("话题", priority=1)
 publish = on_command("发布", priority=1)
 retry = on_command("重试", priority=1)
 refresh = on_command("刷新", priority=1)
@@ -302,6 +303,51 @@ async def handle_retry(bot: Bot, event: GroupMessageEvent, args: Message = Comma
     if data.get("ok"):
         record = data["data"]["result"]["record"]
         await bot.send(event, f"@{tweet['authorScreenName']} #{seq} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
+    else:
+        await bot.send(event, error_text(data))
+
+
+@topic.handle()
+async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    """话题库管理：!话题 列出 | !话题 <B站话题号> <别名> [名称] 添加 | !话题 删除 <别名>。"""
+    if await precheck(event):
+        return
+    parts = args.extract_plain_text().strip().split()
+    # 无参数 → 列出话题库
+    if not parts:
+        data = await call_api("/api/topics", "GET", event=event)
+        if not data.get("ok"):
+            await bot.send(event, error_text(data))
+            return
+        topics = data["data"]["topics"]
+        if not topics:
+            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名> [名称]")
+            return
+        lines = ["当前话题库（发布时用别名指定）："]
+        for t in topics:
+            lines.append(f"{t['alias']}  {t['name']}（#{t['biliTopicId']}）")
+        lines.append("\n用法：!话题 <B站话题号> <别名> [名称] | !话题 删除 <别名>")
+        await bot.send(event, "\n".join(lines))
+        return
+    # 删除
+    if parts[0] == "删除":
+        if len(parts) < 2:
+            await bot.send(event, "用法：!话题 删除 <别名>")
+            return
+        data = await call_api(f"/api/topics/{parts[1]}", "DELETE", event=event)
+        await bot.send(event, "已删除" if data.get("ok") else error_text(data))
+        return
+    # 添加：<B站话题号> <别名> [名称]
+    if len(parts) < 2:
+        await bot.send(event, "用法：!话题 <B站话题号> <别名> [名称]\n例：!话题 908280 世界计划")
+        return
+    body = {"bili_topic_id": parts[0], "alias": parts[1]}
+    if len(parts) > 2:
+        body["name"] = " ".join(parts[2:])
+    data = await call_api("/api/topics", "POST", body, event)
+    if data.get("ok"):
+        t = data["data"]["topic"]
+        await bot.send(event, f"已添加话题：{t['alias']} → {t['name']}（#{t['biliTopicId']}）")
     else:
         await bot.send(event, error_text(data))
 
