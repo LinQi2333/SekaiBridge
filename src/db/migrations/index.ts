@@ -2,6 +2,7 @@ import { up as initUp } from './001_init.js';
 import { up as notificationsUp } from './002_notifications.js';
 import { up as topicLibraryUp } from './003_topic_library.js';
 import { up as perAccountUp } from './004_per_account.js';
+import { up as normalizeAccountCaseUp } from './005_normalize_account_case.js';
 
 export interface Migration {
   version: number;
@@ -18,4 +19,5 @@ export const migrations: readonly Migration[] = [
   { version: 2, name: 'notifications', up: notificationsUp },
   { version: 3, name: 'topic_library', up: topicLibraryUp },
   { version: 4, name: 'per_account', up: perAccountUp },
+  { version: 5, name: 'normalize_account_case', up: normalizeAccountCaseUp },
 ];

@@ -67,6 +67,18 @@ describe('TweetRepository（规格 §8 / §10）', () => {
     expect(r.deleteByAccount('foo')).toBe(0);
   });
 
+  it('作者名统一小写存储：混合大小写也能按小写账号查询', () => {
+    const r = setup();
+    const t = r.create(tweetInput({ xTweetId: '100', authorScreenName: 'Rin23331' }));
+    expect(t.authorScreenName).toBe('rin23331');
+    expect(r.findByAccountAndSeq('rin23331', 1)?.xTweetId).toBe('100');
+    expect(r.findByAccountAndSeq('Rin23331', 1)?.xTweetId).toBe('100'); // 查询侧也转小写
+    // 同账号大小写混合不会产生两条 seq=1
+    r.create(tweetInput({ xTweetId: '200', authorScreenName: 'RIN23331' }));
+    expect(r.findByAccountAndSeq('rin23331', 2)?.xTweetId).toBe('200');
+    expect(r.findByAccountAndSeq('rin23331', 1)?.xTweetId).toBe('100');
+  });
+
   it('x_tweet_id 唯一去重（规格 §19）', () => {
     const r = setup();
     r.create(tweetInput({ xTweetId: '100' }));

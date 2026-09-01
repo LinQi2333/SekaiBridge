@@ -82,9 +82,11 @@ export class TweetRepository {
   create(input: NewTweetInput): Tweet {
     const mediaJson = input.media && input.media.length > 0 ? JSON.stringify(input.media) : null;
     const rawJson = input.rawJson !== undefined ? JSON.stringify(input.rawJson) : null;
+    // 作者名统一小写：与监听账号（已小写规范化）保持一致，避免查询大小写不匹配
+    const screenName = input.authorScreenName.toLowerCase();
     const seqRow = this.db
       .prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM tweets WHERE author_screen_name = ?')
-      .get(input.authorScreenName) as { seq: number };
+      .get(screenName) as { seq: number };
     try {
       const info = this.db
         .prepare(
@@ -96,7 +98,7 @@ export class TweetRepository {
         .run(
           seqRow.seq,
           input.xTweetId,
-          input.authorScreenName,
+          screenName,
           input.authorName ?? null,
           input.tweetUrl,
           input.originalText,
@@ -137,17 +139,19 @@ export class TweetRepository {
     return row ? toDomain(row) : null;
   }
 
-  /** 按账号内编号查找（各账号编号独立）。 */
+  /** 按账号内编号查找（各账号编号独立；账号名大小写不敏感）。 */
   findByAccountAndSeq(screenName: string, seq: number): Tweet | null {
     const row = this.db
       .prepare('SELECT * FROM tweets WHERE author_screen_name = ? AND seq = ?')
-      .get(screenName, seq) as unknown as TweetRow | undefined;
+      .get(screenName.toLowerCase(), seq) as unknown as TweetRow | undefined;
     return row ? toDomain(row) : null;
   }
 
   /** 删除某账号的全部推文（translations/publish_records/notifications 由外键级联）。 */
   deleteByAccount(screenName: string): number {
-    const info = this.db.prepare('DELETE FROM tweets WHERE author_screen_name = ?').run(screenName);
+    const info = this.db
+      .prepare('DELETE FROM tweets WHERE author_screen_name = ?')
+      .run(screenName.toLowerCase());
     return info.changes;
   }
 
