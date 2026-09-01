@@ -102,7 +102,9 @@ export class SqliteMonitorService implements MonitorService {
     const mode: 'bootstrap' | 'incremental' = account.bootstrapCompleted ? 'incremental' : 'bootstrap';
     try {
       const response = await this.tweetToaster.getTimeline(account.screenName);
-      const inputs = toNewTweetInputs(response);
+      // TweetToaster 时间线按时间倒序（新的在前）。反转后再入库，
+      // 使本地编号随发布时间递增（最早的 #1、最新的 #N），避免"新推文编号反而小"
+      const inputs = toNewTweetInputs(response).reverse();
       const result: MonitorPollResult = {
         screenName: account.screenName,
         mode,
