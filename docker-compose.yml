@@ -12,6 +12,14 @@ services:
     image: ghcr.io/cn-matsuri/tweettoaster:latest
     restart: unless-stopped
     shm_size: 512m
+    environment:
+      # 可选代理：国内服务器访问 Twitter 图床（pbs.twimg.com）被墙时，
+      # 在 .env 配 HTTPS_PROXY=http://你的代理:端口，主程序与 TweetToaster 同时生效
+      # （TweetToaster 通过 Node --use-env-proxy 读取代理环境变量；
+      #   若镜像 Node < 22.10 不支持该标志，需改用注入脚本方案，见 docs/DEPLOYMENT.md）
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
+      - NODE_OPTIONS=${TWEETTOASTER_NODE_OPTIONS:-}
     volumes:
       - tweettoaster-cache:/app/Matsuri_translation/frontend/cache
     # 主程序通过容器内网访问；如需本机调试可取消注释
@@ -40,6 +48,9 @@ services:
       PUBLISH_MODE: manual
       API_PORT: 18080
       API_TOKEN: ${API_TOKEN:-}
+      # 可选代理：访问 Twitter 图床被墙时配置（与 tweettoaster 共用）
+      - HTTPS_PROXY=${HTTPS_PROXY:-}
+      - HTTP_PROXY=${HTTP_PROXY:-}
     volumes:
       - app-data:/app/data
       - app-cache:/app/cache
