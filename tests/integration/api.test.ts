@@ -161,6 +161,12 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
     expect(res.status).toBe(403);
   });
 
+  it('无监听账号：/列表 返回空结果（account=null），而非报错', async () => {
+    const list = await api('/api/tweets?status=pending', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(list.status).toBe(200);
+    expect(list.json.data).toMatchObject({ items: [], total: 0, account: null });
+  });
+
   it('/列表 与 /查看（规格 §26 / §27，不含原文正文）', async () => {
     const repos = createRepositories(testDb!.app.db);
     // 需要一个默认账号（首个监听账号自动成为默认）
@@ -508,12 +514,12 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
     const r3 = await api('/api/tweets/resolve?seq=99', { token: TOKEN, user: MEMBER, group: GROUP });
     expect(r3.status).toBe(404);
 
-    // 未设置默认账号时 seq 解析报错（删光全部账号后无默认）
+    // 无任何监听账号时 seq 解析报 NO_WATCHED_ACCOUNTS（删光全部账号）
     await api('/api/watched-accounts/foo', { method: 'DELETE', token: TOKEN, user: ADMIN, group: GROUP });
     await api('/api/watched-accounts/bar', { method: 'DELETE', token: TOKEN, user: ADMIN, group: GROUP });
     const r4 = await api('/api/tweets/resolve?seq=1', { token: TOKEN, user: MEMBER, group: GROUP });
     expect(r4.status).toBe(400);
-    expect((r4.json.error as { code: string }).code).toBe('NO_DEFAULT_ACCOUNT');
+    expect((r4.json.error as { code: string }).code).toBe('NO_WATCHED_ACCOUNTS');
     void t1;
   });
 

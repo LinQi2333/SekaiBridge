@@ -130,7 +130,12 @@ export function createApiServer(options: ApiServerOptions): http.Server {
     }
     const def = services.watch.getDefault();
     if (!def) {
-      throw new ApiError(400, 'NO_DEFAULT_ACCOUNT', '未设置默认账号，请用 !监听 默认 @账号 指定');
+      const hasAny = services.watch.list().length > 0;
+      throw new ApiError(
+        400,
+        hasAny ? 'NO_DEFAULT_ACCOUNT' : 'NO_WATCHED_ACCOUNTS',
+        hasAny ? '未设置默认账号，请用 !监听 默认 @账号 指定' : '暂无监听账号，请先 !监听 添加 @账号',
+      );
     }
     return def.screenName;
   }
@@ -301,6 +306,11 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         const filter = parseListFilter(q.get('status'));
         const page = Number.parseInt(q.get('page') ?? '1', 10);
         const pageSize = Number.parseInt(q.get('page_size') ?? '20', 10);
+        // 没有任何监听账号：空列表是正常结果，不是错误
+        if (services.watch.list().length === 0) {
+          ok(res, { items: [], total: 0, page, pageSize, account: null });
+          return;
+        }
         const accountName = resolveAccountName(q);
         const result = services.tweetQuery.list(filter, { page, pageSize, account: accountName });
         for (const item of result.items) {

@@ -162,6 +162,9 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
         return
     result = data["data"]
     acct = result.get("account") or ""
+    if not acct:
+        await bot.send(event, "暂无监听账号，请先 !监听 添加 @账号")
+        return
     if not result["items"]:
         await bot.send(event, f"@{acct} 暂无{PENDING_LABELS[status]}任务")
         return
