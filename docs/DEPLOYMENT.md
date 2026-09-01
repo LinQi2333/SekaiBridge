@@ -275,7 +275,7 @@ API_TOKEN=你的64位随机hex
 # 1. 安装 Docker Engine + Docker Compose v2（Ubuntu/Debian/CentOS 均可）
 
 # 2. 克隆仓库并配置
-git clone <你的仓库地址> twitter-qq-bilibili && cd twitter-qq-bilibili
+git clone https://github.com/LinQi2333/SekaiBridge.git && cd SekaiBridge
 cp .env.example .env
 # 编辑 .env：QQ_GROUP_IDS / QQ_ADMIN_IDS / BILI_* / API_TOKEN 必填
 
