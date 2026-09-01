@@ -107,11 +107,10 @@ export function formatTranslationSaved(tweetId: number, version: number): string
 }
 
 /** 话题库列表输出（规格 §31）。 */
-export function formatTopicList(topics: { alias: string; name: string; biliTopicId: string }[]): string {
+export function formatTopicList(topics: { alias: string; biliTopicId: string }[]): string {
   if (topics.length === 0) {
     return '可用话题：\n\n（暂无话题，请联系管理员添加）';
   }
-  const width = Math.max(...topics.map((t) => t.alias.length)) + 3;
-  const lines = topics.map((t) => `${t.alias.padEnd(width)}${t.name}（#${t.biliTopicId}）`);
+  const lines = topics.map((t) => `${t.alias}（#${t.biliTopicId}）`);
   return `可用话题：\n\n${lines.join('\n')}`;
 }

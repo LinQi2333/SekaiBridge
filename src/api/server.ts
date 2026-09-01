@@ -367,19 +367,17 @@ export function createApiServer(options: ApiServerOptions): http.Server {
       }
       if (method === 'POST' && pathname === '/api/topics') {
         authorize(req, 'admin');
-        const body = (await readBody(req)) as { bili_topic_id?: unknown; alias?: unknown; name?: unknown };
+        const body = (await readBody(req)) as { bili_topic_id?: unknown; alias?: unknown };
         if (typeof body.bili_topic_id !== 'string' || !body.bili_topic_id.trim()) {
           throw new ApiError(400, 'BAD_PARAM', '缺少 bili_topic_id');
         }
         if (typeof body.alias !== 'string' || !body.alias.trim()) {
           throw new ApiError(400, 'BAD_PARAM', '缺少 alias');
         }
-        const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined;
         ok(res, {
           topic: services.topic.createTopic({
             biliTopicId: body.bili_topic_id.trim(),
             alias: body.alias,
-            name,
           }),
         });
         return;

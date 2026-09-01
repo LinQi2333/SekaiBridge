@@ -108,13 +108,11 @@ describe('QQ 展示格式化（规格 §42 / §27 / §51）', () => {
 
   it('话题列表（规格 §31）', () => {
     const text = formatTopicList([
-      { alias: 'default', name: '夏色祭', biliTopicId: '10001' },
-      { alias: 'hololive', name: 'hololive', biliTopicId: '23456' },
-      { alias: 'live', name: 'VTuber直播', biliTopicId: '34567' },
+      { alias: 'hololive', biliTopicId: '23456' },
+      { alias: 'live', biliTopicId: '34567' },
     ]);
     expect(text).toContain('可用话题：');
-    expect(text).toContain('default    夏色祭（#10001）');
-    expect(text).toContain('hololive   hololive（#23456）');
-    expect(text).toContain('live       VTuber直播（#34567）');
+    expect(text).toContain('hololive（#23456）');
+    expect(text).toContain('live（#34567）');
   });
 });

@@ -239,12 +239,12 @@ describe('DefaultPublishService（规格 §33-§39 / §53）', () => {
       expect.objectContaining({ topicId: null, topicName: null }),
     );
 
-    // 带别名发布 → 从话题库解析
-    repos.topics.create({ alias: 'live', biliTopicId: '34567', name: 'VTuber直播' });
+    // 带别名发布 → 从话题库解析（topicName 用别名占位）
+    repos.topics.create({ alias: 'live', biliTopicId: '34567' });
     const tweetId2 = createTranslatedTweet(repos, { media: [] });
     await service.publish(tweetId2, 'live');
     expect(dynamicPublisher.publishDynamic).toHaveBeenLastCalledWith(
-      expect.objectContaining({ topicId: '34567', topicName: 'VTuber直播' }),
+      expect.objectContaining({ topicId: '34567', topicName: 'live' }),
     );
   });
 

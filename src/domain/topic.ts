@@ -3,10 +3,8 @@ export interface BiliTopic {
   id: number;
   /** 群内使用的别名，如 hololive。 */
   alias: string;
-  /** Bilibili 话题 ID。 */
+  /** Bilibili 话题 ID（发布时按 id 挂话题）。 */
   biliTopicId: string;
-  /** Bilibili 话题名称。 */
-  name: string;
   enabled: boolean;
   createdAt: string;
 }
@@ -14,6 +12,4 @@ export interface BiliTopic {
 export interface NewBiliTopicInput {
   alias: string;
   biliTopicId: string;
-  /** Bilibili 话题名称；省略时默认取别名。 */
-  name?: string;
 }

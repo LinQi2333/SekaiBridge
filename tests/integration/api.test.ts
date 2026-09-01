@@ -239,9 +239,8 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
       body: { bili_topic_id: '23456', alias: 'hololive' },
     });
     expect(add.status).toBe(200);
-    expect((add.json.data as { topic: { alias: string; name: string; biliTopicId: string } }).topic).toMatchObject({
+    expect((add.json.data as { topic: { alias: string; biliTopicId: string } }).topic).toMatchObject({
       alias: 'hololive',
-      name: 'hololive',
       biliTopicId: '23456',
     });
 

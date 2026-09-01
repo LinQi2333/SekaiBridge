@@ -9,7 +9,7 @@ import { AlreadyExistsError, NotFoundError } from './errors.js';
  */
 export interface TopicService {
   list(): BiliTopic[];
-  /** 添加话题到库；名称省略时默认取别名。 */
+  /** 添加话题到库（别名 + B站话题号）。 */
   createTopic(input: NewBiliTopicInput): BiliTopic;
   getByAlias(alias: string): BiliTopic | null;
   /** 按别名从库中移除；不存在抛 NotFoundError。 */
@@ -32,8 +32,7 @@ export class SqliteTopicService implements TopicService {
     if (this.topics.findByBiliTopicId(biliTopicId)) {
       throw new AlreadyExistsError(`B站话题号已存在: ${biliTopicId}`);
     }
-    const name = input.name?.trim() || alias;
-    return this.topics.create({ alias, biliTopicId, name });
+    return this.topics.create({ alias, biliTopicId });
   }
 
   getByAlias(alias: string): BiliTopic | null {

@@ -98,7 +98,9 @@ async def handle_watch(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         if not data.get("ok"):
             await bot.send(event, error_text(data))
             return
-        msg = f"已监听 @{name}（首个账号自动设为默认）"
+        msg = f"已监听 @{name}"
+        if data["data"]["account"].get("isDefault"):
+            msg += "（首个账号自动设为默认）"
         # 立即刷新一次：触发该账号 bootstrap，历史推文马上可用（否则立刻 !查看 会提示没有 #1）
         refresh_data = await call_api("/api/refresh", "POST", {"account": name}, event)
         if refresh_data.get("ok"):
@@ -321,12 +323,12 @@ async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             return
         topics = data["data"]["topics"]
         if not topics:
-            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名> [名称]")
+            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名>")
             return
         lines = ["当前话题库（发布时用别名指定）："]
         for t in topics:
-            lines.append(f"{t['alias']}  {t['name']}（#{t['biliTopicId']}）")
-        lines.append("\n用法：!话题 <B站话题号> <别名> [名称] | !话题 删除 <别名>")
+            lines.append(f"{t['alias']}（#{t['biliTopicId']}）")
+        lines.append("\n用法：!话题 <B站话题号> <别名> | !话题 删除 <别名>")
         await bot.send(event, "\n".join(lines))
         return
     # 删除
@@ -337,18 +339,15 @@ async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         data = await call_api(f"/api/topics/{parts[1]}", "DELETE", event=event)
         await bot.send(event, "已删除" if data.get("ok") else error_text(data))
         return
-    # 添加：<B站话题号> <别名> [名称]
+    # 添加：<B站话题号> <别名>
     if len(parts) < 2:
-        await bot.send(event, "用法：!话题 <B站话题号> <别名> [名称]\n例：!话题 1322677 日常")
+        await bot.send(event, "用法：!话题 <B站话题号> <别名>\n例：!话题 1322677 日常")
         return
     body = {"bili_topic_id": parts[0], "alias": parts[1]}
-    if len(parts) > 2:
-        body["name"] = " ".join(parts[2:])
     data = await call_api("/api/topics", "POST", body, event)
     if data.get("ok"):
         t = data["data"]["topic"]
-        name_note = f"（{t['name']}）" if t.get("name") and t["name"] != t["alias"] else ""
-        await bot.send(event, f"已添加话题：{t['biliTopicId']} → {t['alias']}{name_note}")
+        await bot.send(event, f"已添加话题：{t['biliTopicId']} → {t['alias']}")
     else:
         await bot.send(event, error_text(data))
 

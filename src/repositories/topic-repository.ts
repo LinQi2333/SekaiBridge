@@ -5,7 +5,6 @@ interface TopicRow {
   id: number;
   alias: string;
   bili_topic_id: string;
-  name: string;
   enabled: number;
   created_at: string;
 }
@@ -15,7 +14,6 @@ function toDomain(row: TopicRow): BiliTopic {
     id: row.id,
     alias: row.alias,
     biliTopicId: row.bili_topic_id,
-    name: row.name,
     enabled: row.enabled === 1,
     createdAt: row.created_at,
   };
@@ -49,8 +47,8 @@ export class TopicRepository {
 
   create(input: NewBiliTopicInput): BiliTopic {
     const info = this.db
-      .prepare('INSERT INTO bili_topics (alias, bili_topic_id, name) VALUES (?, ?, ?)')
-      .run(input.alias, input.biliTopicId, input.name);
+      .prepare('INSERT INTO bili_topics (alias, bili_topic_id) VALUES (?, ?)')
+      .run(input.alias, input.biliTopicId);
     return this.findByAlias(input.alias) as BiliTopic;
   }
 

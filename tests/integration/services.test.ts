@@ -192,10 +192,9 @@ describe('TranslationService（规格 §28 / §29 / §30）', () => {
 });
 
 describe('TopicService（规格 §31）', () => {
-  it('创建话题（名称省略默认取别名）、列表、删除', () => {
+  it('创建话题、列表、删除', () => {
     const s = setup();
     const topic = s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456' });
-    expect(topic.name).toBe('hololive'); // 名称省略 → 默认取别名
     expect(topic.enabled).toBe(true);
     expect(s.topic.list().map((t) => t.alias)).toEqual(['hololive']);
 
@@ -205,11 +204,11 @@ describe('TopicService（规格 §31）', () => {
 
   it('重复别名 / 重复B站话题号抛 AlreadyExistsError；删除未知话题抛 NotFoundError', () => {
     const s = setup();
-    s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
-    expect(() => s.topic.createTopic({ alias: 'hololive', biliTopicId: '1', name: 'x' })).toThrow(
+    s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456' });
+    expect(() => s.topic.createTopic({ alias: 'hololive', biliTopicId: '1' })).toThrow(
       AlreadyExistsError,
     );
-    expect(() => s.topic.createTopic({ alias: 'other', biliTopicId: '23456', name: 'x' })).toThrow(
+    expect(() => s.topic.createTopic({ alias: 'other', biliTopicId: '23456' })).toThrow(
       AlreadyExistsError,
     );
     expect(() => s.topic.removeTopic('ghost')).toThrow(NotFoundError);
@@ -255,7 +254,7 @@ describe('Services 与 QQ 解耦（规格 §10 / §61 / §54-22）', () => {
     // 与 /翻译 /话题(库) /查看 /发布 对应的纯服务调用
     const result = s.translation.submit(tweet.id, '10001', '译文 🌸');
     expect(result.translation.version).toBe(1);
-    s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
+    s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456' });
     expect(s.topic.getByAlias('hololive')?.biliTopicId).toBe('23456');
     expect(createTweet(s)).toBeGreaterThan(0);
   });
