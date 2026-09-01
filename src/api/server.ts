@@ -374,7 +374,11 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         if (typeof body.alias !== 'string' || !body.alias.trim()) {
           throw new ApiError(400, 'BAD_PARAM', '缺少 alias');
         }
-        const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined;
+        let name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined;
+        // 未给名称时尽力反查 B站话题真名（失败回退用别名）
+        if (!name) {
+          name = (await services.resolveTopicName?.(body.bili_topic_id.trim())) ?? undefined;
+        }
         ok(res, {
           topic: services.topic.createTopic({
             biliTopicId: body.bili_topic_id.trim(),

@@ -37,6 +37,9 @@ const NAV_URL = 'https://api.bilibili.com/x/web-interface/nav';
 const IMAGE_UPLOAD_URL = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs';
 const DYNAMIC_CREATE_URL = 'https://api.bilibili.com/x/dynamic/feed/create/dyn';
 
+const BROWSER_UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
 // 业务 code 中表示登录失效 / 风控的常见值
 // -101 账号未登录、-111 csrf 校验失败、-352 风控校验失败、-412 请求被拦截
 const AUTH_CODES = new Set([-101, -111, -352, -412]);
@@ -150,6 +153,40 @@ export class BilibiliClient {
     return String(dynamicId);
   }
 
+  /**
+   * 按 B站话题号反查话题名（尽力而为）。
+   * B 站已无公开的"话题号→名字"API（topic/* 全 404、搜索被风控），
+   * 只能抓话题页 HTML 提取；服务器（真实 Cookie + 机房 IP）可能成功，
+   * 失败返回 null（调用方回退用别名）。
+   */
+  async fetchTopicName(topicId: string): Promise<string | null> {
+    const url = `https://t.bilibili.com/topic/name/${encodeURIComponent(topicId)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const response = await this.fetchImpl(url, {
+        headers: {
+          cookie: this.#cookieHeader(),
+          'user-agent': BROWSER_UA,
+          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-fetch-dest': 'document',
+          'sec-fetch-mode': 'navigate',
+          'sec-fetch-site': 'same-origin',
+          referer: 'https://www.bilibili.com/',
+        },
+        signal: controller.signal,
+      });
+      if (!response.ok) return null;
+      const html = await response.text();
+      return extractTopicNameFromHtml(html);
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async #signedParams(params: Record<string, string | number>): Promise<WbiSignResult> {
     const keys = await this.#getWbiKeys();
     return signWbi(params, keys.imgKey, keys.subKey);
@@ -188,8 +225,7 @@ export class BilibiliClient {
           cookie: this.#cookieHeader(),
           // 以下头尽可能贴近真实浏览器（Chrome/Windows，t.bilibili.com 动态编辑器），
           // 与 wbi 签名配合降低风控误判
-          'user-agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'user-agent': BROWSER_UA,
           accept: 'application/json, text/plain, */*',
           'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
           'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
@@ -256,4 +292,28 @@ export class BilibiliClient {
       `DedeUserID=${this.cookie.dedeuserid}`,
     ].join('; ');
   }
+}
+
+/** 从话题页 HTML 提取话题名；依次尝试 og:title / <title> / 内嵌 topicInfo.name。 */
+export function extractTopicNameFromHtml(html: string): string | null {
+  const og =
+    /property=["']og:title["'][^>]*content=["']([^"']+)["']/i.exec(html) ??
+    /content=["']([^"']+)["'][^>]*property=["']og:title["']/i.exec(html);
+  if (og?.[1]) {
+    return cleanTopicName(og[1]);
+  }
+  const title = /<title>([^<]*)<\/title>/i.exec(html);
+  if (title?.[1]) {
+    return cleanTopicName(title[1]);
+  }
+  const info = /"topicInfo"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"/.exec(html);
+  return info?.[1] ?? null;
+}
+
+function cleanTopicName(raw: string): string | null {
+  const cleaned = raw
+    .replace(/_哔哩哔哩_bilibili$/, '')
+    .replace(/- 哔哩哔哩\s*$/, '')
+    .trim();
+  return cleaned.length > 0 ? cleaned : null;
 }

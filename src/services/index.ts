@@ -60,6 +60,8 @@ export interface AppServices {
   screenshot: ScreenshotService;
   media: MediaService;
   newTweetProcessor: NewTweetProcessor;
+  /** 按 B站话题号反查话题名（添加话题时未给名称用；无客户端时 undefined）。 */
+  resolveTopicName?: (topicId: string) => Promise<string | null>;
 }
 
 export interface Repositories {
@@ -97,6 +99,8 @@ export interface ServiceDeps {
     imageUploader: ImageUploader;
     dynamicPublisher: DynamicPublisher;
   };
+  /** Bilibili 客户端（提供后用于话题名反查等尽力而为的能力）。 */
+  biliClient?: import('../bilibili/client.js').BilibiliClient;
   /** 全局 fetch 注入（测试用；默认 globalThis.fetch）。 */
   fetchImpl?: typeof fetch;
 }
@@ -176,6 +180,9 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     screenshot,
     media,
     newTweetProcessor,
+    resolveTopicName: deps?.biliClient
+      ? (topicId: string) => deps.biliClient!.fetchTopicName(topicId)
+      : undefined,
   };
 }
 
