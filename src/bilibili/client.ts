@@ -82,7 +82,7 @@ export class BilibiliClient {
     form.append('file_up', new Blob([new Uint8Array(buffer)]), filename);
     form.append('category', 'daily');
     form.append('biz', 'new_dyn');
-    form.append('csrf', this.cookie.jct);
+    form.append('csrf', this.#jct());
     const payload = await this.#request(IMAGE_UPLOAD_URL, { method: 'POST', body: form });
     const data = payload.data as
       | { image_url?: string; image_width?: number; image_height?: number; img_size?: number }
@@ -135,8 +135,8 @@ export class BilibiliClient {
         name: input.topicName ?? '',
       };
     }
-    const wbi = await this.#signedParams({ csrf: this.cookie.jct });
-    const url = `${DYNAMIC_CREATE_URL}?csrf=${this.cookie.jct}&w_rid=${wbi.w_rid}&wts=${wbi.wts}`;
+    const wbi = await this.#signedParams({ csrf: this.#jct() });
+    const url = `${DYNAMIC_CREATE_URL}?csrf=${this.#jct()}&w_rid=${wbi.w_rid}&wts=${wbi.wts}`;
     const payload = await this.#request(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -235,6 +235,15 @@ export class BilibiliClient {
       throw new BilibiliApiError(message, payload.code);
     }
     return payload;
+  }
+
+  /** csrf token：优先 cookie.jct，否则从完整 Cookie 串解析 bili_jct=。 */
+  #jct(): string {
+    if (this.cookie.jct) {
+      return this.cookie.jct;
+    }
+    const match = /(?:^|;\s*)bili_jct=([^;]+)/.exec(this.cookieString);
+    return match?.[1] ?? '';
   }
 
   #cookieHeader(): string {

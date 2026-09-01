@@ -173,6 +173,8 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     expect(headers?.['sec-fetch-mode']).toBe('cors');
     expect(headers?.origin).toBe('https://t.bilibili.com');
     expect(headers?.['user-agent']).toContain('Chrome/126');
+    // csrf 从完整 Cookie 串解析（三件套为空也能拿到 bili_jct）
+    expect((uploadInit?.body as FormData).get('csrf')).toBe('j');
   });
 
   it('登录失效：业务 code -101 → BilibiliAuthError（§54-18 Cookie 过期）', async () => {
