@@ -16,6 +16,8 @@ RUN npm prune --omit=dev
 
 # ---- 运行阶段 ----
 FROM node:22-slim
+# 时区：展示层（Node Date）按东八区输出
+ENV TZ=Asia/Shanghai
 WORKDIR /app
 ENV NODE_ENV=production
 # 直接复用构建阶段的产物，运行阶段不再 npm ci / 编译（镜像保持精简）

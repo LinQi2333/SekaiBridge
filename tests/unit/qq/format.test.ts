@@ -93,6 +93,9 @@ describe('QQ 展示格式化（规格 §42 / §27 / §51）', () => {
     expect(sourceLabel('SOURCE_DELETED')).toBe('⚠️ 原推已删除');
     expect(toDisplayTime('2026-08-30T02:15:00.000Z')).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
     expect(toDisplayTime(null)).toBe('未知');
+    // SQLite 无时区标记的 UTC 时间（"YYYY-MM-DD HH:MM:SS"）与带 Z 的同一时刻展示一致
+    expect(toDisplayTime('2026-08-30 02:15:00')).toBe(toDisplayTime('2026-08-30T02:15:00.000Z'));
+    expect(toDisplayTime('not-a-date')).toBe('未知');
   });
 
   it('翻译保存回复（规格 §30）', () => {

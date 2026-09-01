@@ -17,6 +17,7 @@ services:
       # 在 .env 配 HTTPS_PROXY=http://你的代理:端口，主程序与 TweetToaster 同时生效
       # （TweetToaster 通过 Node --use-env-proxy 读取代理环境变量；
       #   若镜像 Node < 22.10 不支持该标志，需改用注入脚本方案，见 docs/DEPLOYMENT.md）
+      - TZ=Asia/Shanghai
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
       - NODE_OPTIONS=${TWEETTOASTER_NODE_OPTIONS:-}
@@ -33,6 +34,7 @@ services:
     depends_on:
       - tweettoaster
     environment:
+      - TZ=Asia/Shanghai
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/app.db
       # 缓存目录与宿主机同路径（bind mount）：返回的截图路径对宿主机 QQ 侧（NapCat）直接可读

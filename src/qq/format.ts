@@ -11,7 +11,12 @@ import { SourceStatus } from '../domain/workflow.js';
 /** ISO 时间 → 'YYYY-MM-DD HH:mm'（本地时区）。 */
 export function toDisplayTime(iso: string | null): string {
   if (!iso) return '未知';
-  const date = new Date(iso);
+  // SQLite datetime('now') 输出 "YYYY-MM-DD HH:MM:SS"（UTC、无时区标记），
+  // 按 UTC 补 Z 再转本地时区，避免被当成本地时间导致差 8 小时
+  const normalized = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(iso)
+    ? `${iso.replace(' ', 'T')}Z`
+    : iso;
+  const date = new Date(normalized);
   if (Number.isNaN(date.getTime())) return '未知';
   const pad = (n: number): string => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
