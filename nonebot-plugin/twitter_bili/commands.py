@@ -94,10 +94,22 @@ async def handle_watch(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             await bot.send(event, "用法：!监听 添加 @账号")
             return
         data = await call_api("/api/watched-accounts", "POST", {"screen_name": name}, event)
-        if data.get("ok"):
-            await bot.send(event, f"已监听 @{name}（首个账号自动设为默认）")
-        else:
+        if not data.get("ok"):
             await bot.send(event, error_text(data))
+            return
+        msg = f"已监听 @{name}（首个账号自动设为默认）"
+        # 立即刷新一次：触发该账号 bootstrap，历史推文马上可用（否则立刻 !查看 会提示没有 #1）
+        refresh_data = await call_api("/api/refresh", "POST", {"account": name}, event)
+        if refresh_data.get("ok"):
+            results = refresh_data["data"]["results"]
+            r = results[0] if results else None
+            if r and r.get("error"):
+                msg += f"\n首次拉取失败：{r['error']}"
+            elif r:
+                msg += f"\n已导入最近的 {r.get('timelineCount', 0)} 条历史推文"
+        else:
+            msg += f"\n首次拉取失败：{error_text(refresh_data)}"
+        await bot.send(event, msg)
         return
     if action == "默认":
         if not name:
@@ -143,7 +155,7 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
     if await precheck(event):
         return
     parts = args.extract_plain_text().strip().split()
-    status = "pending"
+    status = "all"  # 默认查看全部（不指定状态时）
     page = 1
     account = None
     for p in parts:
@@ -166,7 +178,10 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
         await bot.send(event, "暂无监听账号，请先 !监听 添加 @账号")
         return
     if not result["items"]:
-        await bot.send(event, f"@{acct} 暂无{PENDING_LABELS[status]}任务")
+        if status == "all":
+            await bot.send(event, f"@{acct} 暂无任务")
+        else:
+            await bot.send(event, f"@{acct} 暂无{PENDING_LABELS[status]}任务")
         return
     lines = []
     for t in result["items"]:
