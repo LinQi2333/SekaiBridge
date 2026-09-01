@@ -33,6 +33,10 @@ logs/
 # tests / coverage
 coverage/
 
+# python (nonebot-plugin)
+__pycache__/
+*.pyc
+
 # sqlite artifacts (data/ is already ignored, keep for safety)
 *.db
 *.db-wal
