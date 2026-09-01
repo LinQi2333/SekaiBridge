@@ -370,6 +370,7 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         return;
       }
 
+      console.log(`[api] 404 ${method} ${pathname}`); // 调试用：暴露未匹配路由的真实路径
       throw new ApiError(404, 'NOT_FOUND', '接口不存在');
     } catch (error) {
       fail(res, error);
