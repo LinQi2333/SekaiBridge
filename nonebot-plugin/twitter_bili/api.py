@@ -97,3 +97,17 @@ async def dedupe_message(event: GroupMessageEvent) -> bool:
 
 def error_text(data: dict) -> str:
     return f"操作失败：{data.get('error', {}).get('message', '未知错误')}"
+
+
+def file_uri(path: str | None) -> str:
+    """本地文件路径 → file:// URI，供 NapCat 读取宿主机文件。
+
+    绝对路径（如 /opt/sekai-bridge/cache/x.png）拼成 file:///opt/...（三斜杠），
+    避免 file:/// + 绝对路径 产生四斜杠被 NapCat 解析成 //opt/...。
+    """
+    if not path:
+        return ""
+    normalized = path.replace(chr(92), "/")
+    if normalized.startswith("/"):
+        return f"file://{normalized}"
+    return f"file:///{normalized}"

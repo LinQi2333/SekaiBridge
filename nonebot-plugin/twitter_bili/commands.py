@@ -9,7 +9,7 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 
-from .api import call_api, dedupe_message, error_text
+from .api import call_api, dedupe_message, error_text, file_uri
 
 watch = on_command("监听", priority=1)
 tweet_list = on_command("列表", priority=1)
@@ -201,7 +201,7 @@ async def handle_show(bot: Bot, event: GroupMessageEvent, args: Message = Comman
         if tweet.get("screenshotPath"):
             segments = [
                 MessageSegment.text(text + "\n\n[推文截图]"),
-                MessageSegment.image(f"file:///{tweet['screenshotPath'].replace(chr(92), '/')}"),
+                MessageSegment.image(file_uri(tweet["screenshotPath"])),
             ]
             await bot.send(event, segments)
         else:

@@ -35,7 +35,8 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_PATH=/app/data/app.db
-      - CACHE_ROOT=/app/cache
+      # 缓存目录与宿主机同路径（bind mount）：返回的截图路径对宿主机 QQ 侧（NapCat）直接可读
+      - CACHE_ROOT=/opt/sekai-bridge/cache
       - TWEETTOASTER_URL=http://tweettoaster:8082
       - TWITTER_POLL_INTERVAL=${TWITTER_POLL_INTERVAL:-60}
       - SOURCE_CHECK_INTERVAL=${SOURCE_CHECK_INTERVAL:-1800}
@@ -54,7 +55,8 @@ services:
       - HTTP_PROXY=${HTTP_PROXY:-}
     volumes:
       - app-data:/app/data
-      - app-cache:/app/cache
+      # 与宿主机同路径挂载，宿主机 NapCat 可直接读取截图（无需再转换路径）
+      - /opt/sekai-bridge/cache:/opt/sekai-bridge/cache
     ports:
       - "127.0.0.1:18080:18080"
 
@@ -74,6 +76,8 @@ services:
     volumes:
       - napcat-qq:/app/.config/QQ
       - napcat-config:/app/napcat/config
+      # 与宿主机同路径挂载：全栈模式下 napcat 也能读到截图
+      - /opt/sekai-bridge/cache:/opt/sekai-bridge/cache
 
   nonebot2:
     profiles: ["full"]
@@ -95,6 +99,5 @@ services:
 volumes:
   tweettoaster-cache:
   app-data:
-  app-cache:
   napcat-qq:
   napcat-config:
