@@ -33,21 +33,21 @@ services:
     depends_on:
       - tweettoaster
     environment:
-      NODE_ENV: production
-      DATABASE_PATH: /app/data/app.db
-      CACHE_ROOT: /app/cache
-      TWEETTOASTER_URL: http://tweettoaster:8082
-      TWITTER_POLL_INTERVAL: ${TWITTER_POLL_INTERVAL:-60}
-      SOURCE_CHECK_INTERVAL: ${SOURCE_CHECK_INTERVAL:-1800}
-      BOOTSTRAP_MODE: latest_only
-      QQ_GROUP_IDS: ${QQ_GROUP_IDS:-}
-      QQ_ADMIN_IDS: ${QQ_ADMIN_IDS:-}
-      BILI_SESSDATA: ${BILI_SESSDATA:-}
-      BILI_JCT: ${BILI_JCT:-}
-      BILI_DEDEUSERID: ${BILI_DEDEUSERID:-}
-      PUBLISH_MODE: manual
-      API_PORT: 18080
-      API_TOKEN: ${API_TOKEN:-}
+      - NODE_ENV=production
+      - DATABASE_PATH=/app/data/app.db
+      - CACHE_ROOT=/app/cache
+      - TWEETTOASTER_URL=http://tweettoaster:8082
+      - TWITTER_POLL_INTERVAL=${TWITTER_POLL_INTERVAL:-60}
+      - SOURCE_CHECK_INTERVAL=${SOURCE_CHECK_INTERVAL:-1800}
+      - BOOTSTRAP_MODE=latest_only
+      - QQ_GROUP_IDS=${QQ_GROUP_IDS:-}
+      - QQ_ADMIN_IDS=${QQ_ADMIN_IDS:-}
+      - BILI_SESSDATA=${BILI_SESSDATA:-}
+      - BILI_JCT=${BILI_JCT:-}
+      - BILI_DEDEUSERID=${BILI_DEDEUSERID:-}
+      - PUBLISH_MODE=manual
+      - API_PORT=18080
+      - API_TOKEN=${API_TOKEN:-}
       # 可选代理：访问 Twitter 图床被墙时配置（与 tweettoaster 共用）
       - HTTPS_PROXY=${HTTPS_PROXY:-}
       - HTTP_PROXY=${HTTP_PROXY:-}
