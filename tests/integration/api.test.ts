@@ -572,12 +572,12 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
     expect(results.map((r) => r.screenName).sort()).toEqual(['bar', 'foo']);
     expect(results.every((r) => r.mode === 'bootstrap')).toBe(true);
 
-    // 指定账号（大小写不敏感：Rin23331 → rin23331）
+    // 指定账号（大小写不敏感：Bar → bar）
     const single = await api('/api/refresh', {
-      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { account: 'Rin23331' },
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { account: 'Bar' },
     });
     expect(
       (single.json.data as { results: { screenName: string }[] }).results.map((r) => r.screenName),
-    ).toEqual(['rin23331']);
+    ).toEqual(['bar']);
   });
 });
