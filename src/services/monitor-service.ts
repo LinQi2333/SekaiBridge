@@ -117,9 +117,18 @@ export class SqliteMonitorService implements MonitorService {
     const mode: 'bootstrap' | 'incremental' = account.bootstrapCompleted ? 'incremental' : 'bootstrap';
     try {
       const response = await this.tweetToaster.getTimeline(account.screenName);
-      // TweetToaster 时间线按时间倒序（新的在前）。反转后再入库，
-      // 使本地编号随发布时间递增（最早的 #1、最新的 #N），避免"新推文编号反而小"
-      const inputs = toNewTweetInputs(response).reverse();
+      const allInputs = toNewTweetInputs(response);
+      // 只导入账号自己的推文：转推的 author 是原作者，跳过（搬运系统不转载他人内容）。
+      // 反转后再入库，使本地编号随发布时间递增（最早的 #1、最新的 #N）
+      const skipped = allInputs.filter(
+        (i) => i.authorScreenName.toLowerCase() !== account.screenName,
+      );
+      const inputs = allInputs
+        .filter((i) => i.authorScreenName.toLowerCase() === account.screenName)
+        .reverse();
+      if (skipped.length > 0) {
+        log('tweet.retweet.skipped', `@${account.screenName} 跳过 ${skipped.length} 条转发/非本人推文`);
+      }
       const result: MonitorPollResult = {
         screenName: account.screenName,
         mode,
