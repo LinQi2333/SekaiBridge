@@ -271,7 +271,7 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         const body = (await readBody(req)) as { account?: unknown };
         const account =
           typeof body.account === 'string' && body.account.trim()
-            ? body.account.trim().replace(/^@+/, '')
+            ? body.account.trim().toLowerCase().replace(/^@+/, '')
             : undefined;
         const results = await services.monitor.refresh(account);
         ok(res, {
