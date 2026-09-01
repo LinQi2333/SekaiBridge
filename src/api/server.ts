@@ -138,7 +138,8 @@ export function createApiServer(options: ApiServerOptions): http.Server {
   }
 
   function sendJson(res: http.ServerResponse, status: number, payload: unknown): void {
-    const body = JSON.stringify(payload);
+    // 末尾带换行：避免 curl 输出后提示符粘连在同一行
+    const body = JSON.stringify(payload) + '\n';
     res.writeHead(status, {
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
