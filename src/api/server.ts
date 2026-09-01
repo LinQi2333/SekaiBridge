@@ -279,6 +279,7 @@ export function createApiServer(options: ApiServerOptions): http.Server {
             screenName: r.screenName,
             mode: r.mode,
             timelineCount: r.timelineCount,
+            imported: r.imported,
             newTweets: r.newTweets.map((t) => ({ id: t.id, seq: t.seq })),
             duplicateCount: r.duplicateCount,
             error: r.error,

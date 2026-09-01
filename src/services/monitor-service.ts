@@ -20,6 +20,8 @@ export interface MonitorPollResult {
   timelineCount: number;
   /** 本轮新检测到的推文（bootstrap 阶段恒为空，规格 §7 不通知）。 */
   newTweets: Tweet[];
+  /** 本轮实际新建的推文数（bootstrap = 导入的历史推文数）。 */
+  imported: number;
   /** 已存在（重复）的推文数。 */
   duplicateCount: number;
   /** 本轮错误信息；null 表示成功。 */
@@ -36,6 +38,8 @@ export interface MonitorOptions {
   jitterMs?: number;
   /** 增量检测到新推文时的回调（Phase 6 在此发送 QQ 通知）；支持异步。 */
   onNewTweets?: (tweets: Tweet[]) => void | Promise<void>;
+  /** bootstrap 完成回调（用于推送"已导入历史推文"通知）；支持异步。 */
+  onBootstrap?: (info: { screenName: string; imported: number; anchorTweetId: number | null }) => void | Promise<void>;
 }
 
 /**
@@ -54,6 +58,7 @@ export class SqliteMonitorService implements MonitorService {
   private readonly pollIntervalMs: number;
   private readonly jitterMs: number;
   private readonly onNewTweets?: (tweets: Tweet[]) => void;
+  private readonly onBootstrap?: MonitorOptions['onBootstrap'];
 
   private timer: NodeJS.Timeout | null = null;
   private running = false;
@@ -66,6 +71,7 @@ export class SqliteMonitorService implements MonitorService {
     this.pollIntervalMs = options.pollIntervalMs;
     this.jitterMs = options.jitterMs ?? 10_000;
     this.onNewTweets = options.onNewTweets;
+    this.onBootstrap = options.onBootstrap;
   }
 
   /** 启动轮询循环；0 个启用账户时保持空闲。 */
@@ -125,14 +131,19 @@ export class SqliteMonitorService implements MonitorService {
         mode,
         timelineCount: inputs.length,
         newTweets: [],
+        imported: 0,
         duplicateCount: 0,
         error: null,
       };
 
       const newTweets: Tweet[] = [];
+      let createdCount = 0;
+      let lastCreatedId: number | null = null;
       for (const input of inputs) {
         const { tweet, created } = this.tweets.findOrCreate(input);
         if (created) {
+          createdCount += 1;
+          lastCreatedId = tweet.id;
           newTweets.push(tweet);
           log('tweet.detected', `#${tweet.id} @${tweet.authorScreenName} ${tweet.tweetUrl}`);
         } else {
@@ -140,14 +151,20 @@ export class SqliteMonitorService implements MonitorService {
           log('tweet.duplicate', `${tweet.xTweetId}`);
         }
       }
+      result.imported = createdCount;
 
       if (mode === 'bootstrap') {
-        // 规格 §7：首次读取只写入 seen，不发送通知
+        // 规格 §7：首次读取只写入 seen，不发送单条通知
         this.watch.setBootstrapCompleted(account.id, true);
         log(
           'monitor.bootstrap.complete',
           `@${account.screenName} 已记录 ${inputs.length} 条已有推文，本轮不发送通知`,
         );
+        await this.onBootstrap?.({
+          screenName: account.screenName,
+          imported: createdCount,
+          anchorTweetId: lastCreatedId,
+        });
       } else {
         result.newTweets = newTweets;
         if (newTweets.length > 0) {
@@ -213,6 +230,7 @@ function resultBase(
     mode,
     timelineCount: 0,
     newTweets: [],
+    imported: 0,
     duplicateCount: 0,
   };
 }

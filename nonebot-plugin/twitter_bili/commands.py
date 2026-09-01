@@ -311,9 +311,12 @@ async def handle_refresh(bot: Bot, event: GroupMessageEvent, args: Message = Com
     for r in results:
         if r["error"]:
             lines.append(f"@{r['screenName']} 刷新失败：{r['error']}")
-        else:
-            mode = "首次监听（历史已记录，本轮不通知）" if r["mode"] == "bootstrap" else "增量"
+        elif r["mode"] == "bootstrap":
             lines.append(
-                f"@{r['screenName']} 刷新完成：读取 {r['timelineCount']} 条，新增 {len(r['newTweets'])} 条（{mode}）"
+                f"已导入最近的 {r.get('imported', r['timelineCount'])} 条历史推文（之后 @{r['screenName']} 的新推文才会通知）"
+            )
+        else:
+            lines.append(
+                f"@{r['screenName']} 刷新完成：读取 {r['timelineCount']} 条，新增 {len(r['newTweets'])} 条"
             )
     await bot.send(event, "\n".join(lines))
