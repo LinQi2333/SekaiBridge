@@ -45,8 +45,6 @@ export interface Tweet {
   screenshotPath: string | null;
   workflowStatus: WorkflowStatus;
   sourceStatus: SourceStatus;
-  /** 关联的 Bilibili 话题别名（可为 null）。 */
-  topicAlias: string | null;
   lastError: string | null;
   retryCount: number;
   createdAt: string;

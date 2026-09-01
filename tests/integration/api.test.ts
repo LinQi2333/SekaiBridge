@@ -208,28 +208,68 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
     expect(result2.result.translation.version).toBe(2);
   });
 
-  it('话题设置与取消（规格 §32）', async () => {
+  it('话题库：成员可查看；管理员增删（规格 §31）', async () => {
     const repos = createRepositories(testDb!.app.db);
-    const tweet = repos.tweets.create(tweetInput({ xTweetId: '100' }));
-    repos.topics.create({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
 
-    const set = await api(`/api/tweets/${tweet.id}/topic`, {
+    // 管理员添加（名称省略时默认取别名）
+    const add = await api('/api/topics', {
+      method: 'POST',
+      token: TOKEN,
+      user: ADMIN,
+      group: GROUP,
+      body: { bili_topic_id: '23456', alias: 'hololive' },
+    });
+    expect(add.status).toBe(200);
+    expect((add.json.data as { topic: { alias: string; name: string; biliTopicId: string } }).topic).toMatchObject({
+      alias: 'hololive',
+      name: 'hololive',
+      biliTopicId: '23456',
+    });
+
+    // 成员添加 → 403
+    const memberAdd = await api('/api/topics', {
       method: 'POST',
       token: TOKEN,
       user: MEMBER,
       group: GROUP,
-      body: { alias: 'hololive' },
+      body: { bili_topic_id: '34567', alias: 'live' },
     });
-    expect((set.json.data as { tweet: { topicAlias: string | null } }).tweet.topicAlias).toBe('hololive');
+    expect(memberAdd.status).toBe(403);
 
-    const unset = await api(`/api/tweets/${tweet.id}/topic`, {
+    // 重复别名 → 409
+    const dup = await api('/api/topics', {
       method: 'POST',
       token: TOKEN,
-      user: MEMBER,
+      user: ADMIN,
       group: GROUP,
-      body: { alias: null },
+      body: { bili_topic_id: '99999', alias: 'hololive' },
     });
-    expect((unset.json.data as { tweet: { topicAlias: string | null } }).tweet.topicAlias).toBeNull();
+    expect(dup.status).toBe(409);
+
+    // 重复 B站话题号 → 409
+    const dupId = await api('/api/topics', {
+      method: 'POST',
+      token: TOKEN,
+      user: ADMIN,
+      group: GROUP,
+      body: { bili_topic_id: '23456', alias: 'another' },
+    });
+    expect(dupId.status).toBe(409);
+
+    // 成员查看
+    const list = await api('/api/topics', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(list.status).toBe(200);
+    expect((list.json.data as { topics: { alias: string }[] }).topics.map((t) => t.alias)).toEqual(['hololive']);
+
+    // 管理员删除
+    const del = await api('/api/topics/hololive', { method: 'DELETE', token: TOKEN, user: ADMIN, group: GROUP });
+    expect(del.status).toBe(200);
+    const after = await api('/api/topics', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect((after.json.data as { topics: unknown[] }).topics).toHaveLength(0);
+
+    // 成员删除 → 403
+    const memberDel = await api('/api/topics/ghost', { method: 'DELETE', token: TOKEN, user: MEMBER, group: GROUP });
+    expect(memberDel.status).toBe(403);
   });
 
   it('发布：仅管理员，调用 PublishService（幂等由服务保证）', async () => {

@@ -21,7 +21,7 @@ describe('AppDatabase（规格 §44）', () => {
 
   it('迁移全部应用，且 schema_migrations 记录正确', () => {
     testDb = createTestDb();
-    expect(testDb.app.appliedVersions()).toEqual([1, 2]);
+    expect(testDb.app.appliedVersions()).toEqual([1, 2, 3]);
     const row = testDb.app.db
       .prepare('SELECT name FROM schema_migrations WHERE version = 1')
       .get() as { name: string };
@@ -30,13 +30,17 @@ describe('AppDatabase（规格 §44）', () => {
       .prepare('SELECT name FROM schema_migrations WHERE version = 2')
       .get() as { name: string };
     expect(row2.name).toBe('notifications');
+    const row3 = testDb.app.db
+      .prepare('SELECT name FROM schema_migrations WHERE version = 3')
+      .get() as { name: string };
+    expect(row3.name).toBe('topic_library');
   });
 
   it('重复打开同一文件幂等，不重复迁移', () => {
     testDb = createTestDb();
     testDb.app.close();
     const reopened = new AppDatabase({ path: testDb.dbPath });
-    expect(reopened.appliedVersions()).toEqual([1, 2]);
+    expect(reopened.appliedVersions()).toEqual([1, 2, 3]);
     reopened.close();
     testDb = null; // 目录清理在 afterEach 中执行
   });

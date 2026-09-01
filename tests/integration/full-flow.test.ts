@@ -217,14 +217,13 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
     });
     expect(translation.status).toBe(200);
 
-    // 5) 话题（成员，§32）
-    repos.topics.create({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
-    const topic = await api(`/api/tweets/${tweet!.id}/topic`, {
+    // 5) 话题库添加（管理员，§31）——推文不绑话题，发布时按别名取
+    const topic = await api('/api/topics', {
       method: 'POST',
       token: TOKEN,
-      user: MEMBER,
+      user: ADMIN,
       group: GROUP,
-      body: { alias: 'hololive' },
+      body: { bili_topic_id: '23456', alias: 'hololive' },
     });
     expect(topic.status).toBe(200);
 
@@ -234,7 +233,7 @@ describe('Phase 9 完整集成（规格 §62 Phase 9 / §55 Mock）', () => {
       token: TOKEN,
       user: ADMIN,
       group: GROUP,
-      body: {},
+      body: { topic_alias: 'hololive' },
     });
     expect(publish.status).toBe(200);
     const publishData = publish.json.data as { result: { record: { biliDynamicId: string } } };

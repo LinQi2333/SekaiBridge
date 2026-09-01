@@ -291,14 +291,35 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         return;
       }
 
-      // ---- 话题设置（§32，成员）----
-      const topicMatch = /^\/api\/tweets\/(\d+)\/topic$/.exec(pathname);
-      if (topicMatch && method === 'POST') {
+      // ---- 话题库（规格 §31：成员可查看，管理员增删；推文不单独绑话题）----
+      if (method === 'GET' && pathname === '/api/topics') {
         authorize(req, 'member');
-        const body = (await readBody(req)) as { alias?: unknown };
-        const alias = body.alias === null || body.alias === undefined ? null : String(body.alias);
-        const tweet = alias === null ? services.topic.setTopic(Number(topicMatch[1]), null) : services.topic.setTopic(Number(topicMatch[1]), alias);
-        ok(res, { tweet });
+        ok(res, { topics: services.topic.list() });
+        return;
+      }
+      if (method === 'POST' && pathname === '/api/topics') {
+        authorize(req, 'admin');
+        const body = (await readBody(req)) as { bili_topic_id?: unknown; alias?: unknown; name?: unknown };
+        if (typeof body.bili_topic_id !== 'string' || !body.bili_topic_id.trim()) {
+          throw new ApiError(400, 'BAD_PARAM', '缺少 bili_topic_id');
+        }
+        if (typeof body.alias !== 'string' || !body.alias.trim()) {
+          throw new ApiError(400, 'BAD_PARAM', '缺少 alias');
+        }
+        const name = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined;
+        ok(res, {
+          topic: services.topic.createTopic({
+            biliTopicId: body.bili_topic_id.trim(),
+            alias: body.alias,
+            name,
+          }),
+        });
+        return;
+      }
+      const topicLibMatch = /^\/api\/topics\/([^/]+)$/.exec(pathname);
+      if (topicLibMatch && method === 'DELETE') {
+        authorize(req, 'admin');
+        ok(res, { removed: services.topic.removeTopic(decodeURIComponent(topicLibMatch[1] ?? '')) });
         return;
       }
 

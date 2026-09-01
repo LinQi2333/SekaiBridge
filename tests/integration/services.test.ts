@@ -153,34 +153,28 @@ describe('TranslationService（规格 §28 / §29 / §30）', () => {
   });
 });
 
-describe('TopicService（规格 §31 / §32）', () => {
-  it('创建话题、查看列表、给推文设置 / 取消话题', () => {
+describe('TopicService（规格 §31）', () => {
+  it('创建话题（名称省略默认取别名）、列表、删除', () => {
     const s = setup();
-    const topic = s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
+    const topic = s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456' });
+    expect(topic.name).toBe('hololive'); // 名称省略 → 默认取别名
     expect(topic.enabled).toBe(true);
     expect(s.topic.list().map((t) => t.alias)).toEqual(['hololive']);
 
-    const repo = createRepositories(testDb!.app.db);
-    const tweet = repo.tweets.create(tweetInput({ xTweetId: '100' }));
-
-    s.topic.setTopic(tweet.id, 'hololive');
-    expect(s.tweetQuery.getById(tweet.id).topicAlias).toBe('hololive');
-
-    s.topic.setTopic(tweet.id, null); // 取消
-    expect(s.tweetQuery.getById(tweet.id).topicAlias).toBeNull();
+    expect(s.topic.removeTopic('hololive')).toBe(true);
+    expect(s.topic.list()).toHaveLength(0);
   });
 
-  it('重复别名抛 AlreadyExistsError；未知话题抛 NotFoundError', () => {
+  it('重复别名 / 重复B站话题号抛 AlreadyExistsError；删除未知话题抛 NotFoundError', () => {
     const s = setup();
     s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
     expect(() => s.topic.createTopic({ alias: 'hololive', biliTopicId: '1', name: 'x' })).toThrow(
       AlreadyExistsError,
     );
-
-    const repo = createRepositories(testDb!.app.db);
-    const tweet = repo.tweets.create(tweetInput({ xTweetId: '100' }));
-    expect(() => s.topic.setTopic(tweet.id, 'ghost')).toThrow(NotFoundError);
-    expect(() => s.topic.setTopic(9999, 'hololive')).toThrow(NotFoundError);
+    expect(() => s.topic.createTopic({ alias: 'other', biliTopicId: '23456', name: 'x' })).toThrow(
+      AlreadyExistsError,
+    );
+    expect(() => s.topic.removeTopic('ghost')).toThrow(NotFoundError);
   });
 });
 
@@ -220,12 +214,11 @@ describe('Services 与 QQ 解耦（规格 §10 / §61 / §54-22）', () => {
     const repo = createRepositories(testDb!.app.db);
     const tweet = repo.tweets.create(tweetInput({ xTweetId: '100' }));
 
-    // 与 /翻译 /话题 /查看 /发布 对应的纯服务调用
+    // 与 /翻译 /话题(库) /查看 /发布 对应的纯服务调用
     const result = s.translation.submit(tweet.id, '10001', '译文 🌸');
     expect(result.translation.version).toBe(1);
     s.topic.createTopic({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
-    s.topic.setTopic(tweet.id, 'hololive');
-    expect(s.tweetQuery.getById(tweet.id).topicAlias).toBe('hololive');
+    expect(s.topic.getByAlias('hololive')?.biliTopicId).toBe('23456');
     expect(createTweet(s)).toBeGreaterThan(0);
   });
 });

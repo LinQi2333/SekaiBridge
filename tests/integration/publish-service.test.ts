@@ -229,24 +229,22 @@ describe('DefaultPublishService（规格 §33-§39 / §53）', () => {
     expect(tweet?.lastError).toContain('登录失效');
   });
 
-  it('话题：参数优先，其次使用已保存话题（§33）', async () => {
+  it('话题：仅发布参数指定（已保存话题模型已移除，§33 新逻辑）', async () => {
     const { repos, dynamicPublisher, service } = setup([]);
-    repos.topics.create({ alias: 'hololive', biliTopicId: '23456', name: 'hololive' });
-    const tweetId = createTranslatedTweet(repos, { media: [] });
-    repos.tweets.setTopicAlias(tweetId, 'hololive');
 
+    // 不带别名发布 → 无话题
+    const tweetId = createTranslatedTweet(repos, { media: [] });
     await service.publish(tweetId);
     expect(dynamicPublisher.publishDynamic).toHaveBeenCalledWith(
-      expect.objectContaining({ topicId: '23456' }),
+      expect.objectContaining({ topicId: null, topicName: null }),
     );
 
-    // 参数覆盖已保存话题
+    // 带别名发布 → 从话题库解析
     repos.topics.create({ alias: 'live', biliTopicId: '34567', name: 'VTuber直播' });
     const tweetId2 = createTranslatedTweet(repos, { media: [] });
-    repos.tweets.setTopicAlias(tweetId2, 'hololive');
     await service.publish(tweetId2, 'live');
     expect(dynamicPublisher.publishDynamic).toHaveBeenLastCalledWith(
-      expect.objectContaining({ topicId: '34567' }),
+      expect.objectContaining({ topicId: '34567', topicName: 'VTuber直播' }),
     );
   });
 

@@ -16,7 +16,6 @@ interface TweetRow {
   screenshot_path: string | null;
   workflow_status: string;
   source_status: string;
-  topic_alias: string | null;
   last_error: string | null;
   retry_count: number;
   created_at: string;
@@ -43,7 +42,6 @@ function toDomain(row: TweetRow): Tweet {
     screenshotPath: row.screenshot_path,
     workflowStatus,
     sourceStatus,
-    topicAlias: row.topic_alias,
     lastError: row.last_error,
     retryCount: row.retry_count,
     createdAt: row.created_at,
@@ -186,13 +184,6 @@ export class TweetRepository {
     this.db
       .prepare("UPDATE tweets SET screenshot_path = ?, updated_at = datetime('now') WHERE id = ?")
       .run(screenshotPath, id);
-    return this.findById(id);
-  }
-
-  setTopicAlias(id: number, alias: string | null): Tweet | null {
-    this.db
-      .prepare("UPDATE tweets SET topic_alias = ?, updated_at = datetime('now') WHERE id = ?")
-      .run(alias, id);
     return this.findById(id);
   }
 

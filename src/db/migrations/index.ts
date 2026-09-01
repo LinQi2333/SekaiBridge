@@ -1,5 +1,6 @@
 import { up as initUp } from './001_init.js';
 import { up as notificationsUp } from './002_notifications.js';
+import { up as topicLibraryUp } from './003_topic_library.js';
 
 export interface Migration {
   version: number;
@@ -14,4 +15,5 @@ export interface Migration {
 export const migrations: readonly Migration[] = [
   { version: 1, name: 'init', up: initUp },
   { version: 2, name: 'notifications', up: notificationsUp },
+  { version: 3, name: 'topic_library', up: topicLibraryUp },
 ];

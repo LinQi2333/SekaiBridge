@@ -101,7 +101,7 @@ describe('TweetRepository（规格 §8 / §10）', () => {
     expect(updated?.retryCount).toBe(2);
   });
 
-  it('来源状态与截图路径、话题别名', () => {
+  it('来源状态与截图路径', () => {
     const r = setup();
     const tweet = r.create(tweetInput());
     expect(r.setSourceStatus(tweet.id, SourceStatus.SOURCE_DELETED)?.sourceStatus).toBe(
@@ -110,7 +110,6 @@ describe('TweetRepository（规格 §8 / §10）', () => {
     expect(r.setScreenshotPath(tweet.id, 'cache/screenshots/1.png')?.screenshotPath).toBe(
       'cache/screenshots/1.png',
     );
-    expect(r.setTopicAlias(tweet.id, 'hololive')?.topicAlias).toBe('hololive');
   });
 
   it('listForSourceCheck 只返回仍在处理中的推文（规格 §12）', () => {

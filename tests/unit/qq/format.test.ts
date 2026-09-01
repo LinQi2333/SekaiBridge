@@ -27,7 +27,6 @@ function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
     screenshotPath: null,
     workflowStatus: WorkflowStatus.WAITING_TRANSLATION,
     sourceStatus: 'ACTIVE',
-    topicAlias: null,
     lastError: null,
     retryCount: 0,
     createdAt: '2026-08-30T02:16:00.000Z',
@@ -100,19 +99,18 @@ describe('QQ 展示格式化（规格 §42 / §27 / §51）', () => {
     expect(text).toContain('推文 #152 翻译已保存。');
     expect(text).toContain('当前版本：v3');
     expect(text).toContain('状态：已翻译，等待发布。');
-    expect(text).toContain('/话题 152 hololive');
-    expect(text).toContain('/发布 152');
+    expect(text).toContain('/发布 152 [话题别名]');
   });
 
-  it('话题列表（规格 §32）', () => {
+  it('话题列表（规格 §31）', () => {
     const text = formatTopicList([
-      { alias: 'default', name: '夏色祭' },
-      { alias: 'hololive', name: 'hololive' },
-      { alias: 'live', name: 'VTuber直播' },
+      { alias: 'default', name: '夏色祭', biliTopicId: '10001' },
+      { alias: 'hololive', name: 'hololive', biliTopicId: '23456' },
+      { alias: 'live', name: 'VTuber直播', biliTopicId: '34567' },
     ]);
     expect(text).toContain('可用话题：');
-    expect(text).toContain('default    夏色祭');
-    expect(text).toContain('hololive   hololive');
-    expect(text).toContain('live       VTuber直播');
+    expect(text).toContain('default    夏色祭（#10001）');
+    expect(text).toContain('hololive   hololive（#23456）');
+    expect(text).toContain('live       VTuber直播（#34567）');
   });
 });

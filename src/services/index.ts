@@ -168,7 +168,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     watch: new SqliteWatchService(repos.watch),
     tweetQuery: new SqliteTweetQueryService(repos.tweets),
     translation: new SqliteTranslationService(repos.tweets, repos.translations, workflow),
-    topic: new SqliteTopicService(repos.topics, repos.tweets),
+    topic: new SqliteTopicService(repos.topics),
     publish,
     workflow,
     monitor,

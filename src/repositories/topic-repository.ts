@@ -40,6 +40,13 @@ export class TopicRepository {
     return row ? toDomain(row) : null;
   }
 
+  findByBiliTopicId(biliTopicId: string): BiliTopic | null {
+    const row = this.db
+      .prepare('SELECT * FROM bili_topics WHERE bili_topic_id = ?')
+      .get(biliTopicId) as unknown as TopicRow | undefined;
+    return row ? toDomain(row) : null;
+  }
+
   create(input: NewBiliTopicInput): BiliTopic {
     const info = this.db
       .prepare('INSERT INTO bili_topics (alias, bili_topic_id, name) VALUES (?, ?, ?)')

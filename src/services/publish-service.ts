@@ -1,6 +1,7 @@
 import path from 'node:path';
 import type { DynamicPublisher } from '../bilibili/dynamic-publisher.js';
 import type { ImageUploader, UploadedImage } from '../bilibili/image-upload.js';
+import type { BiliTopic } from '../domain/topic.js';
 import { PublishStatus, type PublishRecord } from '../domain/publish.js';
 import { photoMedia } from '../domain/tweet.js';
 import { WorkflowStatus } from '../domain/workflow.js';
@@ -96,15 +97,17 @@ export class DefaultPublishService implements PublishService {
       throw new ValidationError(`#${tweetId} 还没有翻译，请先提交翻译`);
     }
 
-    // 话题：参数优先，否则使用已保存话题（§33）
-    const alias = topicAlias ?? tweet.topicAlias;
-    let topicId: string | null = null;
+    // 话题：仅发布参数指定（已保存话题模型已移除，§33 新逻辑）
+    const alias = topicAlias;
+    let topic: BiliTopic | null = null;
     if (alias) {
-      const topic = this.topics.findByAlias(alias);
+      topic = this.topics.findByAlias(alias);
       if (!topic) {
         throw new ValidationError(`话题不存在: ${alias}`);
       }
-      topicId = topic.biliTopicId;
+      if (!topic.enabled) {
+        throw new ValidationError(`话题已停用: ${alias}`);
+      }
     }
 
     // 进入发布中（合法转移由状态机保证：TRANSLATED / PUBLISH_FAILED → PUBLISHING）
@@ -126,15 +129,15 @@ export class DefaultPublishService implements PublishService {
       const dynamicId = await this.dynamicPublisher.publishDynamic({
         text: translation.text,
         pics,
-        topicId,
-        topicName: alias ? this.topics.findByAlias(alias)?.name ?? null : null,
+        topicId: topic?.biliTopicId ?? null,
+        topicName: topic?.name ?? null,
       });
       const record = this.publishes.create({
         tweetId,
         translationId: translation.id,
         status: PublishStatus.SUCCESS,
         biliDynamicId: dynamicId,
-        biliTopicId: topicId,
+        biliTopicId: topic?.biliTopicId ?? null,
       });
       this.workflow.transition(tweetId, WorkflowStatus.PUBLISHED);
       log('bilibili.publish.complete', `#${tweetId} dynamic=${dynamicId}`);

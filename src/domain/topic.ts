@@ -14,5 +14,6 @@ export interface BiliTopic {
 export interface NewBiliTopicInput {
   alias: string;
   biliTopicId: string;
-  name: string;
+  /** Bilibili 话题名称；省略时默认取别名。 */
+  name?: string;
 }

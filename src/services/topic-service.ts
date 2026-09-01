@@ -1,26 +1,23 @@
 import type { BiliTopic, NewBiliTopicInput } from '../domain/topic.js';
-import type { Tweet } from '../domain/tweet.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
-import { TweetRepository } from '../repositories/tweet-repository.js';
 import { AlreadyExistsError, NotFoundError } from './errors.js';
 
 /**
- * Bilibili 话题（规格 §31 / §32）。
- * 话题别名在群内使用；"无"表示清除话题。
+ * Bilibili 话题库（规格 §31）。
+ * 话题库维护 别名 ↔ B站话题号 映射；推文不单独绑定话题，
+ * 发布时通过 !发布 <编号> <别名> 按别名从库中取话题。
  */
 export interface TopicService {
   list(): BiliTopic[];
+  /** 添加话题到库；名称省略时默认取别名。 */
   createTopic(input: NewBiliTopicInput): BiliTopic;
   getByAlias(alias: string): BiliTopic | null;
-  /** 给推文设置话题；alias 为 null 时清除。 */
-  setTopic(tweetId: number, alias: string | null): Tweet;
+  /** 按别名从库中移除；不存在抛 NotFoundError。 */
+  removeTopic(alias: string): boolean;
 }
 
 export class SqliteTopicService implements TopicService {
-  constructor(
-    private readonly topics: TopicRepository,
-    private readonly tweets: TweetRepository,
-  ) {}
+  constructor(private readonly topics: TopicRepository) {}
 
   list(): BiliTopic[] {
     return this.topics.list(true);
@@ -31,30 +28,24 @@ export class SqliteTopicService implements TopicService {
     if (this.topics.findByAlias(alias)) {
       throw new AlreadyExistsError(`话题别名已存在: ${alias}`);
     }
-    return this.topics.create({ ...input, alias });
+    const biliTopicId = input.biliTopicId.trim();
+    if (this.topics.findByBiliTopicId(biliTopicId)) {
+      throw new AlreadyExistsError(`B站话题号已存在: ${biliTopicId}`);
+    }
+    const name = input.name?.trim() || alias;
+    return this.topics.create({ alias, biliTopicId, name });
   }
 
   getByAlias(alias: string): BiliTopic | null {
     return this.topics.findByAlias(normalizeAlias(alias));
   }
 
-  setTopic(tweetId: number, alias: string | null): Tweet {
-    const tweet = this.tweets.findById(tweetId);
-    if (!tweet) {
-      throw new NotFoundError(`推文不存在: #${tweetId}`);
-    }
-    if (alias === null) {
-      return this.tweets.setTopicAlias(tweetId, null) as Tweet;
-    }
+  removeTopic(alias: string): boolean {
     const normalized = normalizeAlias(alias);
-    const topic = this.topics.findByAlias(normalized);
-    if (!topic) {
+    if (!this.topics.removeByAlias(normalized)) {
       throw new NotFoundError(`话题不存在: ${normalized}`);
     }
-    if (!topic.enabled) {
-      throw new NotFoundError(`话题已停用: ${normalized}`);
-    }
-    return this.tweets.setTopicAlias(tweetId, normalized) as Tweet;
+    return true;
   }
 }
 

@@ -1,4 +1,4 @@
-"""QQ 群命令插件：/监听 /列表 /查看 /翻译 /话题 /发布 /重试。"""
+"""QQ 群命令插件：!监听 !列表 !查看 !翻译 !话题(话题库) !发布 !重试。"""
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
@@ -177,18 +177,45 @@ async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = C
 
 @topic.handle()
 async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    """话题库管理：!话题 列出 | !话题 <B站话题号> <别名> [名称] 添加 | !话题 删除 <别名>。"""
     if await precheck(event):
         return
     parts = args.extract_plain_text().strip().split()
-    if len(parts) < 2 or not parts[0].isdigit():
-        await bot.send(event, "用法：/话题 <编号> <别名|无>")
+    # 无参数 → 列出话题库
+    if not parts:
+        data = await call_api("/api/topics", "GET", event=event)
+        if not data.get("ok"):
+            await bot.send(event, error_text(data))
+            return
+        topics = data["data"]["topics"]
+        if not topics:
+            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名> [名称]")
+            return
+        lines = ["当前话题库（发布时用别名指定）："]
+        for t in topics:
+            lines.append(f"{t['alias']}  {t['name']}（#{t['biliTopicId']}）")
+        lines.append("\n用法：!话题 <B站话题号> <别名> [名称] | !话题 删除 <别名>")
+        await bot.send(event, "\n".join(lines))
         return
-    tweet_id, alias = parts[0], parts[1]
-    body = {"alias": None if alias in ("无", "none") else alias}
-    data = await call_api(f"/api/tweets/{tweet_id}/topic", "POST", body, event)
+    # 删除
+    if parts[0] == "删除":
+        if len(parts) < 2:
+            await bot.send(event, "用法：!话题 删除 <别名>")
+            return
+        data = await call_api(f"/api/topics/{parts[1]}", "DELETE", event=event)
+        await bot.send(event, "已删除" if data.get("ok") else error_text(data))
+        return
+    # 添加：<B站话题号> <别名> [名称]
+    if len(parts) < 2:
+        await bot.send(event, "用法：!话题 <B站话题号> <别名> [名称]\n例：!话题 908280 世界计划")
+        return
+    body = {"bili_topic_id": parts[0], "alias": parts[1]}
+    if len(parts) > 2:
+        body["name"] = " ".join(parts[2:])
+    data = await call_api("/api/topics", "POST", body, event)
     if data.get("ok"):
-        t = data["data"]["tweet"]
-        await bot.send(event, f"#{tweet_id} 话题：{t['topicAlias'] or '（无）'}")
+        t = data["data"]["topic"]
+        await bot.send(event, f"已添加话题：{t['alias']} → {t['name']}（#{t['biliTopicId']}）")
     else:
         await bot.send(event, error_text(data))
 
