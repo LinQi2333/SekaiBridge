@@ -55,16 +55,25 @@ async def call_api(
     body: dict | None = None,
     event: GroupMessageEvent | None = None,
 ) -> dict:
-    """调用主程序 API，返回 JSON（{ok, data} 或 {ok:false, error}）。"""
+    """调用主程序 API，返回 JSON（{ok, data} 或 {ok:false, error}）。
+
+    注意：必须按 method 分派真实 HTTP 方法（PATCH/DELETE 不能走 POST），
+    否则路由不匹配会 404。
+    """
     from nonebot import logger
 
     client = await get_client()
     headers = auth_headers(event)
+    payload = body or {}
     try:
         if method == "GET":
             resp = await client.get(path, headers=headers)
+        elif method == "DELETE":
+            resp = await client.delete(path, headers=headers)
+        elif method == "PATCH":
+            resp = await client.patch(path, headers=headers, json=payload)
         else:
-            resp = await client.post(path, headers=headers, json=body or {})
+            resp = await client.post(path, headers=headers, json=payload)
         logger.info(f"[tqb] {method} {path} -> HTTP {resp.status_code}")
         data = resp.json()
         logger.info(f"[tqb] 响应: {str(data)[:200]}")
