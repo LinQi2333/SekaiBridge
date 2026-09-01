@@ -95,7 +95,12 @@ export function createApiServer(options: ApiServerOptions): http.Server {
       throw new ApiError(401, 'MISSING_IDENTITY', '缺少 X-QQ-User 请求头');
     }
     const groupId = typeof req.headers['x-qq-group'] === 'string' ? req.headers['x-qq-group'] : null;
-    return { userId: userId.trim(), groupId };
+    const roleHeader = req.headers['x-qq-role'];
+    const role =
+      roleHeader === 'owner' || roleHeader === 'admin' || roleHeader === 'member'
+        ? roleHeader
+        : undefined;
+    return { userId: userId.trim(), groupId, role };
   }
 
   function authorize(req: http.IncomingMessage, required: QqPermission): QqIdentity {

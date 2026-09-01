@@ -56,4 +56,31 @@ describe('QQ 权限（规格 §41）', () => {
     });
     expect(result.ok).toBe(false);
   });
+
+  it('群主/群管理员自动视为管理员（无需在 QQ_ADMIN_IDS 中）', () => {
+    const owner = checkPermission({
+      identity: { userId: '30001', groupId: '10001', role: 'owner' },
+      adminIds: ADMIN,
+      groupIds: GROUPS,
+      required: 'admin',
+    });
+    expect(owner.ok).toBe(true);
+
+    const groupAdmin = checkPermission({
+      identity: { userId: '30002', groupId: '10001', role: 'admin' },
+      adminIds: ADMIN,
+      groupIds: GROUPS,
+      required: 'admin',
+    });
+    expect(groupAdmin.ok).toBe(true);
+
+    // 普通成员仍被拒
+    const member = checkPermission({
+      identity: { userId: '30001', groupId: '10001', role: 'member' },
+      adminIds: ADMIN,
+      groupIds: GROUPS,
+      required: 'admin',
+    });
+    expect(member.ok).toBe(false);
+  });
 });

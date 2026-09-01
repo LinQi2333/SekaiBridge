@@ -42,6 +42,10 @@ def auth_headers(event: GroupMessageEvent | None = None) -> dict:
     if event is not None:
         headers["X-QQ-User"] = str(event.user_id)
         headers["X-QQ-Group"] = str(getattr(event, "group_id", ""))
+        # 群角色（owner/admin/member）：主程序据此把群主/群管理视为管理员
+        role = getattr(getattr(event, "sender", None), "role", None)
+        if role in ("owner", "admin", "member"):
+            headers["X-QQ-Role"] = role
     return headers
 
 

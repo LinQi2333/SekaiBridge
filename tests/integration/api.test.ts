@@ -28,6 +28,7 @@ interface ApiOptions {
   token?: string;
   user?: string;
   group?: string;
+  role?: string;
   body?: unknown;
 }
 
@@ -36,6 +37,7 @@ async function api(pathname: string, options: ApiOptions = {}) {
   if (options.token) headers['x-api-token'] = options.token;
   if (options.user) headers['x-qq-user'] = options.user;
   if (options.group) headers['x-qq-group'] = options.group;
+  if (options.role) headers['x-qq-role'] = options.role;
   if (options.body !== undefined) headers['content-type'] = 'application/json';
   const res = await fetch(`${baseUrl}${pathname}`, {
     method: options.method ?? 'GET',
@@ -254,6 +256,57 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
     });
     expect(admin.status).toBe(200);
     expect(mockPublish.publish).toHaveBeenCalledWith(tweet.id, 'hololive');
+  });
+
+  it('发布：群主/群管理员（X-QQ-Role）自动视为管理员，普通成员仍 403', async () => {
+    const repos = createRepositories(testDb!.app.db);
+    const tweet = repos.tweets.create(tweetInput({ xTweetId: '100' }));
+    repos.tweets.updateWorkflowStatus(tweet.id, WorkflowStatus.TRANSLATED);
+
+    // 普通成员带 role=member / 不带 role → 403
+    const plainMember = await api(`/api/tweets/${tweet.id}/publish`, {
+      method: 'POST',
+      token: TOKEN,
+      user: MEMBER,
+      group: GROUP,
+      role: 'member',
+      body: {},
+    });
+    expect(plainMember.status).toBe(403);
+
+    const noRole = await api(`/api/tweets/${tweet.id}/publish`, {
+      method: 'POST',
+      token: TOKEN,
+      user: MEMBER,
+      group: GROUP,
+      body: {},
+    });
+    expect(noRole.status).toBe(403);
+    expect(mockPublish.publish).not.toHaveBeenCalled();
+
+    // 群管理员 → 200
+    const groupAdmin = await api(`/api/tweets/${tweet.id}/publish`, {
+      method: 'POST',
+      token: TOKEN,
+      user: MEMBER,
+      group: GROUP,
+      role: 'admin',
+      body: {},
+    });
+    expect(groupAdmin.status).toBe(200);
+    expect(mockPublish.publish).toHaveBeenCalledTimes(1);
+
+    // 群主 → 200
+    const owner = await api(`/api/tweets/${tweet.id}/publish`, {
+      method: 'POST',
+      token: TOKEN,
+      user: MEMBER,
+      group: GROUP,
+      role: 'owner',
+      body: {},
+    });
+    expect(owner.status).toBe(200);
+    expect(mockPublish.publish).toHaveBeenCalledTimes(2);
   });
 
   it('重试：调用 PublishService（规格 §39）', async () => {
