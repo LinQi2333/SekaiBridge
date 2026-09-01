@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BilibiliClient, extractTopicNameFromHtml } from '../../../src/bilibili/client.js';
+import { BilibiliClient } from '../../../src/bilibili/client.js';
 import {
   BilibiliApiError,
   BilibiliAuthError,
@@ -214,31 +214,5 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
     await expect(client.publishDynamic({ text: 'x' })).rejects.toBeInstanceOf(BilibiliNetworkError);
-  });
-
-  it('fetchTopicName：抓话题页 HTML 提取名字；失败返回 null', async () => {
-    const fetchImpl = vi.fn(async (url: string | URL | Request) => {
-      if (String(url).includes('topic/name/1322677')) {
-        return new Response(
-          '<html><head><meta property="og:title" content="日常系Vlog_哔哩哔哩_bilibili" /></head></html>',
-          { status: 200, headers: { 'content-type': 'text/html' } },
-        );
-      }
-      return new Response('blocked', { status: 403 });
-    });
-    const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
-    expect(await client.fetchTopicName('1322677')).toBe('日常系Vlog');
-    expect(await client.fetchTopicName('99999')).toBeNull(); // 403 → null
-  });
-
-  it('extractTopicNameFromHtml：og:title / title / topicInfo 依次提取并清理后缀', () => {
-    expect(
-      extractTopicNameFromHtml('<meta property="og:title" content="世界计划_哔哩哔哩_bilibili">'),
-    ).toBe('世界计划');
-    expect(extractTopicNameFromHtml('<title>初音ミク - 哔哩哔哩</title>')).toBe('初音ミク');
-    expect(
-      extractTopicNameFromHtml('<script>window.__INITIAL_STATE__={"topicInfo":{"name":"日常"}}</script>'),
-    ).toBe('日常');
-    expect(extractTopicNameFromHtml('<html><body>no name</body></html>')).toBeNull();
   });
 });

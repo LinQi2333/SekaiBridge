@@ -153,40 +153,6 @@ export class BilibiliClient {
     return String(dynamicId);
   }
 
-  /**
-   * 按 B站话题号反查话题名（尽力而为）。
-   * B 站已无公开的"话题号→名字"API（topic/* 全 404、搜索被风控），
-   * 只能抓话题页 HTML 提取；服务器（真实 Cookie + 机房 IP）可能成功，
-   * 失败返回 null（调用方回退用别名）。
-   */
-  async fetchTopicName(topicId: string): Promise<string | null> {
-    const url = `https://t.bilibili.com/topic/name/${encodeURIComponent(topicId)}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      const response = await this.fetchImpl(url, {
-        headers: {
-          cookie: this.#cookieHeader(),
-          'user-agent': BROWSER_UA,
-          accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-          'sec-fetch-dest': 'document',
-          'sec-fetch-mode': 'navigate',
-          'sec-fetch-site': 'same-origin',
-          referer: 'https://www.bilibili.com/',
-        },
-        signal: controller.signal,
-      });
-      if (!response.ok) return null;
-      const html = await response.text();
-      return extractTopicNameFromHtml(html);
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
   async #signedParams(params: Record<string, string | number>): Promise<WbiSignResult> {
     const keys = await this.#getWbiKeys();
     return signWbi(params, keys.imgKey, keys.subKey);
@@ -292,28 +258,4 @@ export class BilibiliClient {
       `DedeUserID=${this.cookie.dedeuserid}`,
     ].join('; ');
   }
-}
-
-/** 从话题页 HTML 提取话题名；依次尝试 og:title / <title> / 内嵌 topicInfo.name。 */
-export function extractTopicNameFromHtml(html: string): string | null {
-  const og =
-    /property=["']og:title["'][^>]*content=["']([^"']+)["']/i.exec(html) ??
-    /content=["']([^"']+)["'][^>]*property=["']og:title["']/i.exec(html);
-  if (og?.[1]) {
-    return cleanTopicName(og[1]);
-  }
-  const title = /<title>([^<]*)<\/title>/i.exec(html);
-  if (title?.[1]) {
-    return cleanTopicName(title[1]);
-  }
-  const info = /"topicInfo"\s*:\s*\{[^}]*"name"\s*:\s*"([^"]+)"/.exec(html);
-  return info?.[1] ?? null;
-}
-
-function cleanTopicName(raw: string): string | null {
-  const cleaned = raw
-    .replace(/_哔哩哔哩_bilibili$/, '')
-    .replace(/- 哔哩哔哩\s*$/, '')
-    .trim();
-  return cleaned.length > 0 ? cleaned : null;
 }

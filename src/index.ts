@@ -37,7 +37,6 @@ function main(): void {
     config,
     tweetToaster,
     fetchImpl,
-    biliClient,
     bilibili: {
       imageUploader: new BilibiliImageUploader(biliClient),
       dynamicPublisher: new BilibiliDynamicPublisher(biliClient),

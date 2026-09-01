@@ -321,12 +321,12 @@ async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             return
         topics = data["data"]["topics"]
         if not topics:
-            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名> [话题全名]")
+            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名> [名称]")
             return
         lines = ["当前话题库（发布时用别名指定）："]
         for t in topics:
             lines.append(f"{t['alias']}  {t['name']}（#{t['biliTopicId']}）")
-        lines.append("\n用法：!话题 <B站话题号> <别名> [话题全名] | !话题 删除 <别名>")
+        lines.append("\n用法：!话题 <B站话题号> <别名> [名称] | !话题 删除 <别名>")
         await bot.send(event, "\n".join(lines))
         return
     # 删除
@@ -337,9 +337,9 @@ async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         data = await call_api(f"/api/topics/{parts[1]}", "DELETE", event=event)
         await bot.send(event, "已删除" if data.get("ok") else error_text(data))
         return
-    # 添加：<B站话题号> <别名> [话题全名]
+    # 添加：<B站话题号> <别名> [名称]
     if len(parts) < 2:
-        await bot.send(event, "用法：!话题 <B站话题号> <别名> [话题全名]\n例：!话题 1322677 日常 日常系Vlog")
+        await bot.send(event, "用法：!话题 <B站话题号> <别名> [名称]\n例：!话题 1322677 日常")
         return
     body = {"bili_topic_id": parts[0], "alias": parts[1]}
     if len(parts) > 2:
@@ -347,10 +347,8 @@ async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = Comma
     data = await call_api("/api/topics", "POST", body, event)
     if data.get("ok"):
         t = data["data"]["topic"]
-        if t.get("name") and t["name"] != t["alias"]:
-            await bot.send(event, f"已添加话题：{t['name']} → {t['alias']}（#{t['biliTopicId']}）")
-        else:
-            await bot.send(event, f"已添加话题：{t['alias']}（#{t['biliTopicId']}）")
+        name_note = f"（{t['name']}）" if t.get("name") and t["name"] != t["alias"] else ""
+        await bot.send(event, f"已添加话题：{t['biliTopicId']} → {t['alias']}{name_note}")
     else:
         await bot.send(event, error_text(data))
 
