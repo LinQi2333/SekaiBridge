@@ -40,8 +40,10 @@ print_status() {
 
 case "$CMD" in
   start|up)
-    echo "==> 构建并启动全部服务..."
-    docker compose up -d --build
+    PROFILE_FLAG=""
+    if [ "${2:-}" = "full" ]; then PROFILE_FLAG="--profile full"; fi
+    echo "==> 构建并启动服务...（${2:-默认: app+tweettoaster；full=全栈含 QQ 侧}）"
+    docker compose $PROFILE_FLAG up -d --build
     echo
     # 等待主程序就绪（最多 60s）
     for i in $(seq 1 30); do

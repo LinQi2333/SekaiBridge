@@ -57,7 +57,11 @@ services:
     ports:
       - "127.0.0.1:18080:18080"
 
+  # QQ 侧（napcat + nonebot2）放在 profile "full" 下：
+  #   - 全新机器：docker compose --profile full up -d（或 ./start.sh full）全栈部署
+  #   - 已有裸机 NapCat/NoneBot2 的服务器：默认 docker compose up -d 只起 app + tweettoaster
   napcat:
+    profiles: ["full"]
     image: mlikiowa/napcat-docker:latest
     restart: unless-stopped
     environment:
@@ -71,6 +75,7 @@ services:
       - napcat-config:/app/napcat/config
 
   nonebot2:
+    profiles: ["full"]
     image: sekai-bridge/nonebot2
     build: ./nonebot-plugin
     restart: unless-stopped
