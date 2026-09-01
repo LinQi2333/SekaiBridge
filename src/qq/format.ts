@@ -46,7 +46,7 @@ export function sourceLabel(status: string): string {
 export function formatNewTweetNotification(tweet: Tweet): string {
   const video = hasVideo(tweet);
   const lines = [
-    `【新推文 #${tweet.id}】`,
+    `【新推文 #${tweet.seq}】`,
     '',
     `账号：@${tweet.authorScreenName}`,
     `时间：${toDisplayTime(tweet.createdAtX)}`,
@@ -68,8 +68,7 @@ export function formatNewTweetNotification(tweet: Tweet): string {
 /** /查看 输出文本（规格 §27）：状态 + 原推链接，不含原文正文。 */
 export function formatTweetView(tweet: Tweet): string {
   const lines = [
-    `#${tweet.id}`,
-    `@${tweet.authorScreenName}`,
+    `#${tweet.seq} @${tweet.authorScreenName}`,
     '',
     `来源状态：${sourceLabel(tweet.sourceStatus)}`,
     `工作状态：${workflowLabel(tweet.workflowStatus)}`,
@@ -86,7 +85,7 @@ export function formatTweetView(tweet: Tweet): string {
 /** /列表 单行（规格 §26 示例：`#155 @foo   待翻译`）。 */
 export function formatTweetListLine(tweet: Tweet): string {
   const deleted = tweet.sourceStatus === SourceStatus.SOURCE_DELETED ? '原推已删除 / ' : '';
-  return `#${tweet.id} @${tweet.authorScreenName}   ${deleted}${workflowLabel(tweet.workflowStatus)}`;
+  return `#${tweet.seq} @${tweet.authorScreenName}   ${deleted}${workflowLabel(tweet.workflowStatus)}`;
 }
 
 /** 翻译提交后的 QQ 回复（规格 §30）。 */

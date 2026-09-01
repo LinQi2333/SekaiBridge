@@ -1,4 +1,10 @@
-"""QQ 群命令插件：!监听 !列表 !查看 !翻译 !话题(话题库) !发布 !重试。"""
+"""QQ 群命令插件：!监听 !列表 !查看 !翻译 !发布 !重试 !刷新。
+
+多账号模型：
+- 每个监听账号拥有独立的推文编号（seq），命令中的编号指账号内编号；
+- 未指定账号的命令（列表/查看/翻译/发布/刷新）作用于默认账号；
+- !监听 默认 @账号 可切换默认账号。
+"""
 from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
@@ -9,11 +15,20 @@ watch = on_command("监听", priority=1)
 tweet_list = on_command("列表", priority=1)
 show = on_command("查看", priority=1)
 translate = on_command("翻译", priority=1)
-topic = on_command("话题", priority=1)
 publish = on_command("发布", priority=1)
 retry = on_command("重试", priority=1)
+refresh = on_command("刷新", priority=1)
 
 PENDING_LABELS = {"pending": "待翻译", "translated": "已翻译", "published": "已发布", "failed": "失败", "all": "全部"}
+
+# 兼容中英文状态词（!列表 已翻译 与 !列表 translated 等价）
+STATUS_ALIASES = {
+    "pending": "pending", "待翻译": "pending", "待处理": "pending",
+    "translated": "translated", "已翻译": "translated",
+    "published": "published", "已发布": "published",
+    "failed": "failed", "失败": "failed", "发布失败": "failed",
+    "all": "all", "全部": "all",
+}
 
 
 def summarize(text: str, max_chars: int = 30) -> str:
@@ -24,9 +39,30 @@ def summarize(text: str, max_chars: int = 30) -> str:
     return flat[:max_chars] + "…"
 
 
+def pick_account(parts: list[str]) -> str | None:
+    """从参数中提取 @账号（第一个以 @ 开头的 token）。"""
+    for p in parts:
+        if p.startswith("@"):
+            return p.lstrip("@").strip()
+    return None
+
+
 async def precheck(event: GroupMessageEvent) -> bool:
     """消息去重：重复消息返回 True，直接忽略。"""
     return await dedupe_message(event)
+
+
+async def resolve_tweet(
+    event: GroupMessageEvent, seq: str, account: str | None = None
+) -> tuple[dict | None, dict]:
+    """按账号内编号解析推文（账号缺省用默认账号），返回 (tweet, data)。"""
+    path = f"/api/tweets/resolve?seq={seq}"
+    if account:
+        path += f"&account={account}"
+    data = await call_api(path, "GET", event=event)
+    if not data.get("ok"):
+        return None, data
+    return data["data"]["tweet"], data
 
 
 @watch.handle()
@@ -41,35 +77,60 @@ async def handle_watch(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             return
         accounts = data["data"]["accounts"]
         if not accounts:
-            await bot.send(event, "当前没有监听账户。\n\n用法：/监听 添加 @账号")
+            await bot.send(event, "当前没有监听账户。\n\n用法：!监听 添加 @账号 | !监听 默认 @账号")
             return
-        lines = ["当前监听账户："]
-        for i, a in enumerate(accounts, 1):
-            lines.append(f"{i}. @{a['screenName']}    {'开启' if a['enabled'] else '关闭'}")
-        lines.append("\n用法：/监听 添加 @账号 | 开启 @账号 | 关闭 @账号 | 删除 @账号")
+        lines = ["当前监听账户（⭐=默认账号）："]
+        for a in accounts:
+            state = "开启" if a["enabled"] else "关闭"
+            mark = "⭐ " if a["isDefault"] else "   "
+            lines.append(f"{mark}@{a['screenName']}  {state}")
+        lines.append("\n用法：!监听 添加 @账号 | !监听 默认 @账号 | !监听 开启/关闭/删除 @账号")
         await bot.send(event, "\n".join(lines))
         return
     action, _, name = msg.partition(" ")
     name = name.strip().lstrip("@")
     if action == "添加":
         if not name:
-            await bot.send(event, "用法：/监听 添加 @账号")
+            await bot.send(event, "用法：!监听 添加 @账号")
             return
         data = await call_api("/api/watched-accounts", "POST", {"screen_name": name}, event)
-    elif action in ("开启", "关闭"):
+        if data.get("ok"):
+            await bot.send(event, f"已监听 @{name}（首个账号自动设为默认）")
+        else:
+            await bot.send(event, error_text(data))
+        return
+    if action == "默认":
         if not name:
-            await bot.send(event, f"用法：/监听 {action} @账号")
+            await bot.send(event, "用法：!监听 默认 @账号")
+            return
+        data = await call_api(f"/api/watched-accounts/{name}", "PATCH", {"default": True}, event)
+        if data.get("ok"):
+            await bot.send(event, f"已将 @{name} 设为默认账号")
+        else:
+            await bot.send(event, error_text(data))
+        return
+    if action in ("开启", "关闭"):
+        if not name:
+            await bot.send(event, f"用法：!监听 {action} @账号")
             return
         data = await call_api(
             f"/api/watched-accounts/{name}", "PATCH", {"enabled": action == "开启"}, event
         )
     elif action == "删除":
         if not name:
-            await bot.send(event, "用法：/监听 删除 @账号")
+            await bot.send(event, "用法：!监听 删除 @账号")
             return
         data = await call_api(f"/api/watched-accounts/{name}", "DELETE", event=event)
+        if data.get("ok"):
+            removed = data["data"].get("removed")
+            cleaned = data["data"].get("tweetsDeleted", 0)
+            if removed:
+                await bot.send(event, f"已删除 @{name}，并清空其 {cleaned} 条历史推文")
+                return
+        await bot.send(event, error_text(data))
+        return
     else:
-        await bot.send(event, "用法：/监听 | /监听 添加 @账号 | /监听 开启 @账号 | /监听 关闭 @账号 | /监听 删除 @账号")
+        await bot.send(event, "用法：!监听 | !监听 添加 @账号 | !监听 默认 @账号 | !监听 开启 @账号 | !监听 关闭 @账号 | !监听 删除 @账号")
         return
     if data.get("ok"):
         await bot.send(event, "操作成功")
@@ -84,32 +145,35 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
     parts = args.extract_plain_text().strip().split()
     status = "pending"
     page = 1
-    if parts:
-        if parts[0] in PENDING_LABELS:
-            status = parts[0]
-            if len(parts) > 1 and parts[1].isdigit():
-                page = int(parts[1])
-        elif parts[0].isdigit():
-            page = int(parts[0])
-    data = await call_api(
-        f"/api/tweets?status={status}&page={page}&page_size=10", "GET", event=event
-    )
+    account = None
+    for p in parts:
+        if p.startswith("@"):
+            account = p.lstrip("@")
+        elif p in STATUS_ALIASES:
+            status = STATUS_ALIASES[p]
+        elif p.isdigit():
+            page = int(p)
+    query = f"/api/tweets?status={status}&page={page}&page_size=10"
+    if account:
+        query += f"&account={account}"
+    data = await call_api(query, "GET", event=event)
     if not data.get("ok"):
         await bot.send(event, error_text(data))
         return
     result = data["data"]
+    acct = result.get("account") or ""
     if not result["items"]:
-        await bot.send(event, f"暂无{PENDING_LABELS[status]}任务")
+        await bot.send(event, f"@{acct} 暂无{PENDING_LABELS[status]}任务")
         return
     lines = []
     for t in result["items"]:
         deleted = "原推已删除 / " if t["sourceStatus"] == "SOURCE_DELETED" else ""
         lines.append(
-            f"#{t['id']} @{t['authorScreenName']}   {deleted}{t['workflowStatus']}\n"
+            f"#{t['seq']} @{t['authorScreenName']}   {deleted}{t['workflowStatus']}\n"
             f"{summarize(t.get('originalText'))}"
         )
     total_pages = max(1, (result["total"] + 9) // 10)
-    lines.append(f"\n第 {page}/{total_pages} 页 · 共 {result['total']} 条")
+    lines.append(f"\n@{acct} · 第 {page}/{total_pages} 页 · 共 {result['total']} 条")
     await bot.send(event, "\n\n".join(lines))
 
 
@@ -117,34 +181,32 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
 async def handle_show(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
     if await precheck(event):
         return
-    ids = args.extract_plain_text().strip().replace("，", ",").replace(" ", ",")
-    if not ids:
-        await bot.send(event, "用法：/查看 <编号> 或 /查看 152,155")
+    parts = args.extract_plain_text().strip().replace("，", ",").split()
+    seqs = [p for p in parts if p.isdigit()]
+    account = pick_account(parts)
+    if not seqs:
+        await bot.send(event, "用法：!查看 <编号> [@账号]\n例：!查看 3 | !查看 3,5 @pj_sekai")
         return
-    data = await call_api(f"/api/tweets?ids={ids}", "GET", event=event)
-    if not data.get("ok"):
-        await bot.send(event, error_text(data))
-        return
-    result = data["data"]
-    for t in result["tweets"]:
-        deleted = "⚠️ 原推已删除" if t["sourceStatus"] == "SOURCE_DELETED" else "正常"
+    for seq in seqs:
+        tweet, data = await resolve_tweet(event, seq, account)
+        if tweet is None:
+            await bot.send(event, error_text(data))
+            continue
+        deleted = "⚠️ 原推已删除" if tweet["sourceStatus"] == "SOURCE_DELETED" else "正常"
         text = (
-            f"#{t['id']} @{t['authorScreenName']}\n"
-            f"来源状态：{deleted}\n工作状态：{t['workflowStatus']}\n"
-            f"原推：\n{t['tweetUrl']}"
+            f"@{tweet['authorScreenName']} #{tweet['seq']}\n"
+            f"来源状态：{deleted}\n工作状态：{tweet['workflowStatus']}\n"
+            f"原推：\n{tweet['tweetUrl']}"
         )
-        if t.get("screenshotPath"):
-            # 发送文本 + 推文截图（图片来自主程序本地缓存路径）
+        if tweet.get("screenshotPath"):
             segments = [
                 MessageSegment.text(text + "\n\n[推文截图]"),
-                MessageSegment.image(f"file:///{t['screenshotPath'].replace(chr(92), '/')}"),
+                MessageSegment.image(f"file:///{tweet['screenshotPath'].replace(chr(92), '/')}"),
             ]
             await bot.send(event, segments)
         else:
             text += "\n\n（该推文暂无截图：历史/待处理推文，新推文会自动生成截图）"
             await bot.send(event, text)
-    if result["missing"]:
-        await bot.send(event, "未找到：" + ",".join(f"#{i}" for i in result["missing"]))
 
 
 @translate.handle()
@@ -153,13 +215,18 @@ async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = C
         return
     text = args.extract_plain_text().strip()
     first_line, _, content = text.partition("\n")
-    parts = first_line.split()
-    if not parts or not parts[0].isdigit() or not content.strip():
-        await bot.send(event, "用法：/翻译 <编号>\n翻译内容...（第二行开始是翻译正文）")
+    tokens = first_line.split()
+    if not tokens or not tokens[0].isdigit() or not content.strip():
+        await bot.send(event, "用法：!翻译 <编号> [@账号]\n翻译内容...（第二行开始是翻译正文）")
         return
-    tweet_id = parts[0]
+    seq = tokens[0]
+    account = pick_account(tokens[1:])
+    tweet, data = await resolve_tweet(event, seq, account)
+    if tweet is None:
+        await bot.send(event, error_text(data))
+        return
     data = await call_api(
-        f"/api/tweets/{tweet_id}/translation",
+        f"/api/tweets/{tweet['id']}/translation",
         "POST",
         {"text": content, "qq_user_id": str(event.user_id)},
         event,
@@ -170,54 +237,9 @@ async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = C
     tr = data["data"]["result"]["translation"]
     await bot.send(
         event,
-        f"推文 #{tweet_id} 翻译已保存。\n\n当前版本：v{tr['version']}\n"
-        f"状态：已翻译，等待发布。\n\n可继续：\n/话题 {tweet_id} hololive\n/发布 {tweet_id}",
+        f"@{tweet['authorScreenName']} #{seq} 翻译已保存。\n\n当前版本：v{tr['version']}\n"
+        f"状态：已翻译，等待发布。\n\n可继续：\n!发布 {seq} [话题别名]",
     )
-
-
-@topic.handle()
-async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
-    """话题库管理：!话题 列出 | !话题 <B站话题号> <别名> [名称] 添加 | !话题 删除 <别名>。"""
-    if await precheck(event):
-        return
-    parts = args.extract_plain_text().strip().split()
-    # 无参数 → 列出话题库
-    if not parts:
-        data = await call_api("/api/topics", "GET", event=event)
-        if not data.get("ok"):
-            await bot.send(event, error_text(data))
-            return
-        topics = data["data"]["topics"]
-        if not topics:
-            await bot.send(event, "话题库为空。\n\n用法：!话题 <B站话题号> <别名> [名称]")
-            return
-        lines = ["当前话题库（发布时用别名指定）："]
-        for t in topics:
-            lines.append(f"{t['alias']}  {t['name']}（#{t['biliTopicId']}）")
-        lines.append("\n用法：!话题 <B站话题号> <别名> [名称] | !话题 删除 <别名>")
-        await bot.send(event, "\n".join(lines))
-        return
-    # 删除
-    if parts[0] == "删除":
-        if len(parts) < 2:
-            await bot.send(event, "用法：!话题 删除 <别名>")
-            return
-        data = await call_api(f"/api/topics/{parts[1]}", "DELETE", event=event)
-        await bot.send(event, "已删除" if data.get("ok") else error_text(data))
-        return
-    # 添加：<B站话题号> <别名> [名称]
-    if len(parts) < 2:
-        await bot.send(event, "用法：!话题 <B站话题号> <别名> [名称]\n例：!话题 908280 世界计划")
-        return
-    body = {"bili_topic_id": parts[0], "alias": parts[1]}
-    if len(parts) > 2:
-        body["name"] = " ".join(parts[2:])
-    data = await call_api("/api/topics", "POST", body, event)
-    if data.get("ok"):
-        t = data["data"]["topic"]
-        await bot.send(event, f"已添加话题：{t['alias']} → {t['name']}（#{t['biliTopicId']}）")
-    else:
-        await bot.send(event, error_text(data))
 
 
 @publish.handle()
@@ -226,14 +248,20 @@ async def handle_publish(bot: Bot, event: GroupMessageEvent, args: Message = Com
         return
     parts = args.extract_plain_text().strip().split()
     if not parts or not parts[0].isdigit():
-        await bot.send(event, "用法：/发布 <编号> [话题别名]")
+        await bot.send(event, "用法：!发布 <编号> [话题别名] [@账号]")
         return
-    tweet_id = parts[0]
-    body = {"topic_alias": parts[1]} if len(parts) > 1 else {}
-    data = await call_api(f"/api/tweets/{tweet_id}/publish", "POST", body, event)
+    seq = parts[0]
+    account = pick_account(parts[1:])
+    alias = next((p for p in parts[1:] if not p.startswith("@") and p != seq), None)
+    tweet, data = await resolve_tweet(event, seq, account)
+    if tweet is None:
+        await bot.send(event, error_text(data))
+        return
+    body = {"topic_alias": alias} if alias else {}
+    data = await call_api(f"/api/tweets/{tweet['id']}/publish", "POST", body, event)
     if data.get("ok"):
         record = data["data"]["result"]["record"]
-        await bot.send(event, f"#{tweet_id} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
+        await bot.send(event, f"@{tweet['authorScreenName']} #{seq} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
     else:
         await bot.send(event, error_text(data))
 
@@ -242,13 +270,47 @@ async def handle_publish(bot: Bot, event: GroupMessageEvent, args: Message = Com
 async def handle_retry(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
     if await precheck(event):
         return
-    tweet_id = args.extract_plain_text().strip()
-    if not tweet_id.isdigit():
-        await bot.send(event, "用法：/重试 <编号>")
+    parts = args.extract_plain_text().strip().split()
+    if not parts or not parts[0].isdigit():
+        await bot.send(event, "用法：!重试 <编号> [@账号]")
         return
-    data = await call_api(f"/api/tweets/{tweet_id}/retry", "POST", event=event)
+    seq = parts[0]
+    account = pick_account(parts[1:])
+    tweet, data = await resolve_tweet(event, seq, account)
+    if tweet is None:
+        await bot.send(event, error_text(data))
+        return
+    data = await call_api(f"/api/tweets/{tweet['id']}/retry", "POST", event=event)
     if data.get("ok"):
         record = data["data"]["result"]["record"]
-        await bot.send(event, f"#{tweet_id} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
+        await bot.send(event, f"@{tweet['authorScreenName']} #{seq} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
     else:
         await bot.send(event, error_text(data))
+
+
+@refresh.handle()
+async def handle_refresh(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    """立即刷新：!刷新 [@账号]；不指定账号时刷新全部启用账户。"""
+    if await precheck(event):
+        return
+    parts = args.extract_plain_text().strip().split()
+    account = pick_account(parts)
+    body = {"account": account} if account else {}
+    data = await call_api("/api/refresh", "POST", body, event)
+    if not data.get("ok"):
+        await bot.send(event, error_text(data))
+        return
+    results = data["data"]["results"]
+    if not results:
+        await bot.send(event, "没有启用的监听账户")
+        return
+    lines = []
+    for r in results:
+        if r["error"]:
+            lines.append(f"@{r['screenName']} 刷新失败：{r['error']}")
+        else:
+            mode = "首次监听（历史已记录，本轮不通知）" if r["mode"] == "bootstrap" else "增量"
+            lines.append(
+                f"@{r['screenName']} 刷新完成：读取 {r['timelineCount']} 条，新增 {len(r['newTweets'])} 条（{mode}）"
+            )
+    await bot.send(event, "\n".join(lines))

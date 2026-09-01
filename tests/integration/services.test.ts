@@ -63,14 +63,52 @@ describe('WatchService（规格 §5 / §25）', () => {
     s.watch.enable('foo');
     expect(s.watch.list().find((a) => a.screenName === 'foo')?.enabled).toBe(true);
 
-    expect(s.watch.remove('bar')).toBe(true);
+    expect(s.watch.remove('bar')).toMatchObject({ removed: true });
     expect(s.watch.list()).toHaveLength(1);
-    expect(s.watch.remove('bar')).toBe(false);
+    expect(s.watch.remove('bar')).toMatchObject({ removed: false });
   });
 
   it('对不存在的账号开启/关闭抛 NotFoundError', () => {
     const s = setup();
     expect(() => s.watch.enable('ghost')).toThrow(NotFoundError);
+  });
+
+  it('默认账号：首个自动默认、setDefault 切换、getDefault（多账号分离）', () => {
+    const s = setup();
+    s.watch.add('foo');
+    expect(s.watch.getDefault()?.screenName).toBe('foo');
+
+    s.watch.add('bar');
+    expect(s.watch.getDefault()?.screenName).toBe('foo'); // 首个保持默认
+
+    s.watch.setDefault('bar');
+    expect(s.watch.getDefault()?.screenName).toBe('bar');
+    expect(s.watch.list().filter((a) => a.isDefault)).toHaveLength(1);
+
+    expect(() => s.watch.setDefault('ghost')).toThrow(NotFoundError);
+  });
+
+  it('删除监听：连带清空该账号历史推文；默认账号被删后提升剩余第一个', () => {
+    const s = setup();
+    s.watch.add('foo');
+    s.watch.add('bar');
+    s.watch.setDefault('bar');
+
+    const repo = createRepositories(testDb!.app.db);
+    repo.tweets.create(tweetInput({ xTweetId: '100', authorScreenName: 'foo' }));
+    repo.tweets.create(tweetInput({ xTweetId: '200', authorScreenName: 'foo' }));
+    repo.tweets.create(tweetInput({ xTweetId: '300', authorScreenName: 'bar' }));
+
+    // 删除非默认账号 foo：清掉 foo 的推文，bar 的保留
+    expect(s.watch.remove('foo')).toMatchObject({ removed: true, tweetsDeleted: 2 });
+    expect(repo.tweets.count({ filter: 'all' })).toBe(1);
+    expect(repo.tweets.findByXId('300')?.authorScreenName).toBe('bar');
+    expect(s.watch.getDefault()?.screenName).toBe('bar');
+
+    // 删除默认账号 bar：推文清空，默认提升给剩余账号（无剩余则为空）
+    expect(s.watch.remove('bar')).toMatchObject({ removed: true, tweetsDeleted: 1 });
+    expect(repo.tweets.count({ filter: 'all' })).toBe(0);
+    expect(s.watch.getDefault()).toBeNull();
   });
 
   it('0 个监听账户时应用状态正常（规格 §5 / §54-1）', () => {

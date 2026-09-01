@@ -5,7 +5,7 @@ import { TweetRepository } from '../repositories/tweet-repository.js';
 import { WatchRepository } from '../repositories/watch-repository.js';
 import { toNewTweetInputs } from '../tweettoaster/normalize.js';
 import type { ToasterTweetResponse } from '../tweettoaster/types.js';
-import { NotImplementedError } from './errors.js';
+import { NotFoundError, NotImplementedError } from './errors.js';
 
 /** Monitor 依赖的 timeline 数据源（TweetToasterClient 满足该结构，便于测试注入 mock）。 */
 export interface TimelineSource {
@@ -95,6 +95,21 @@ export class SqliteMonitorService implements MonitorService {
       results.push(await this.pollAccount(account));
     }
     return results;
+  }
+
+  /**
+   * 立即刷新：指定账号则只刷新该账号，否则刷新全部启用账户。
+   * （!刷新 [@账号] 指令后端，规格 §8 手动轮询）
+   */
+  async refresh(screenName?: string): Promise<MonitorPollResult[]> {
+    if (!screenName) {
+      return this.pollOnce();
+    }
+    const account = this.watch.findByScreenName(screenName);
+    if (!account) {
+      throw new NotFoundError(`账号未在监听: @${screenName}`);
+    }
+    return [await this.pollAccount(account)];
   }
 
   /** 轮询单个账户（bootstrap 或增量）。 */
@@ -207,6 +222,8 @@ export interface MonitorService {
   start(): void;
   stop(): void;
   pollOnce(): Promise<MonitorPollResult[]>;
+  /** 立即刷新：指定账号只刷该账号，否则全部启用账户。 */
+  refresh(screenName?: string): Promise<MonitorPollResult[]>;
   isRunning(): boolean;
 }
 
@@ -220,6 +237,10 @@ export class StubMonitorService implements MonitorService {
   }
 
   pollOnce(): Promise<MonitorPollResult[]> {
+    throw new NotImplementedError('MonitorService（Phase 3）');
+  }
+
+  refresh(_screenName?: string): Promise<MonitorPollResult[]> {
     throw new NotImplementedError('MonitorService（Phase 3）');
   }
 

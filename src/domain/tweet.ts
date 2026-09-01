@@ -31,8 +31,10 @@ export interface NewTweetInput {
 
 /** 推文（本地任务，规格 §10）。 */
 export interface Tweet {
-  /** 本地任务编号，QQ 群与未来 Web 默认使用（#152）。 */
+  /** 本地全局 ID（内部外键用，不出现在 QQ 展示）。 */
   id: number;
+  /** 账号内编号（展示用：#seq），各账号独立从 1 递增。 */
+  seq: number;
   xTweetId: string;
   authorScreenName: string;
   authorName: string | null;

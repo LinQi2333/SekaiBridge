@@ -165,7 +165,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
       : new StubPublishService());
 
   return {
-    watch: new SqliteWatchService(repos.watch),
+    watch: new SqliteWatchService(repos.watch, repos.tweets),
     tweetQuery: new SqliteTweetQueryService(repos.tweets),
     translation: new SqliteTranslationService(repos.tweets, repos.translations, workflow),
     topic: new SqliteTopicService(repos.topics),

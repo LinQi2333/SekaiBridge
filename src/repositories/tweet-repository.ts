@@ -4,6 +4,7 @@ import { parseSourceStatus, parseWorkflowStatus, SourceStatus, WorkflowStatus } 
 
 interface TweetRow {
   id: number;
+  seq: number;
   x_tweet_id: string;
   author_screen_name: string;
   author_name: string | null;
@@ -30,6 +31,7 @@ function toDomain(row: TweetRow): Tweet {
   }
   return {
     id: row.id,
+    seq: row.seq,
     xTweetId: row.x_tweet_id,
     authorScreenName: row.author_screen_name,
     authorName: row.author_name,
@@ -59,6 +61,8 @@ export type TweetListFilter =
 
 export interface TweetListOptions {
   filter?: TweetListFilter;
+  /** 账号内独立编号按账号过滤；缺省查全部账号。 */
+  account?: string;
   /** 1-based 页码。 */
   page?: number;
   pageSize?: number;
@@ -74,19 +78,23 @@ export class DuplicateTweetError extends Error {
 export class TweetRepository {
   constructor(private readonly db: Database.Database) {}
 
-  /** 插入新推文。x_tweet_id 重复时抛 DuplicateTweetError。 */
+  /** 插入新推文。x_tweet_id 重复时抛 DuplicateTweetError。seq 按账号内递增。 */
   create(input: NewTweetInput): Tweet {
     const mediaJson = input.media && input.media.length > 0 ? JSON.stringify(input.media) : null;
     const rawJson = input.rawJson !== undefined ? JSON.stringify(input.rawJson) : null;
+    const seqRow = this.db
+      .prepare('SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM tweets WHERE author_screen_name = ?')
+      .get(input.authorScreenName) as { seq: number };
     try {
       const info = this.db
         .prepare(
           `INSERT INTO tweets
-             (x_tweet_id, author_screen_name, author_name, tweet_url, original_text,
+             (seq, x_tweet_id, author_screen_name, author_name, tweet_url, original_text,
               created_at_x, detected_at, raw_json, media_json)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
+          seqRow.seq,
           input.xTweetId,
           input.authorScreenName,
           input.authorName ?? null,
@@ -129,20 +137,34 @@ export class TweetRepository {
     return row ? toDomain(row) : null;
   }
 
+  /** 按账号内编号查找（各账号编号独立）。 */
+  findByAccountAndSeq(screenName: string, seq: number): Tweet | null {
+    const row = this.db
+      .prepare('SELECT * FROM tweets WHERE author_screen_name = ? AND seq = ?')
+      .get(screenName, seq) as unknown as TweetRow | undefined;
+    return row ? toDomain(row) : null;
+  }
+
+  /** 删除某账号的全部推文（translations/publish_records/notifications 由外键级联）。 */
+  deleteByAccount(screenName: string): number {
+    const info = this.db.prepare('DELETE FROM tweets WHERE author_screen_name = ?').run(screenName);
+    return info.changes;
+  }
+
   list(options: TweetListOptions = {}): Tweet[] {
     const page = Math.max(1, options.page ?? 1);
     const pageSize = Math.max(1, Math.min(100, options.pageSize ?? 20));
     const offset = (page - 1) * pageSize;
 
-    const { where, params } = buildListWhere(options.filter ?? 'pending');
+    const { where, params } = buildListWhere(options.filter ?? 'pending', options.account);
     const rows = this.db
-      .prepare(`SELECT * FROM tweets ${where} ORDER BY id DESC LIMIT ? OFFSET ?`)
+      .prepare(`SELECT * FROM tweets ${where} ORDER BY seq DESC LIMIT ? OFFSET ?`)
       .all(...params, pageSize, offset) as unknown as TweetRow[];
     return rows.map(toDomain);
   }
 
-  count(options: { filter?: TweetListFilter } = {}): number {
-    const { where, params } = buildListWhere(options.filter ?? 'pending');
+  count(options: { filter?: TweetListFilter; account?: string } = {}): number {
+    const { where, params } = buildListWhere(options.filter ?? 'pending', options.account);
     const row = this.db
       .prepare(`SELECT COUNT(*) AS count FROM tweets ${where}`)
       .get(...params) as { count: number };
@@ -219,25 +241,31 @@ export class TweetRepository {
   }
 }
 
-function buildListWhere(filter: TweetListFilter): { where: string; params: unknown[] } {
+function buildListWhere(filter: TweetListFilter, account?: string): { where: string; params: unknown[] } {
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+  if (account) {
+    conditions.push('author_screen_name = ?');
+    params.push(account);
+  }
   switch (filter) {
     case 'all':
-      return { where: '', params: [] };
+      break;
     case 'pending':
-      return {
-        where: "WHERE workflow_status IN ('DETECTED', 'SCREENSHOT_READY', 'QQ_SENT', 'WAITING_TRANSLATION')",
-        params: [],
-      };
+      conditions.push("workflow_status IN ('DETECTED', 'SCREENSHOT_READY', 'QQ_SENT', 'WAITING_TRANSLATION')");
+      break;
     case 'translated':
-      return {
-        where: "WHERE workflow_status IN ('TRANSLATED', 'READY_TO_PUBLISH')",
-        params: [],
-      };
+      conditions.push("workflow_status IN ('TRANSLATED', 'READY_TO_PUBLISH')");
+      break;
     case 'published':
-      return { where: "WHERE workflow_status = 'PUBLISHED'", params: [] };
+      conditions.push("workflow_status = 'PUBLISHED'");
+      break;
     case 'failed':
-      return { where: "WHERE workflow_status = 'PUBLISH_FAILED'", params: [] };
+      conditions.push("workflow_status = 'PUBLISH_FAILED'");
+      break;
   }
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return { where, params };
 }
 
 function isUniqueConstraintError(error: unknown): boolean {

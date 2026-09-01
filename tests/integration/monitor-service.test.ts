@@ -3,6 +3,7 @@ import { AppDatabase } from '../../src/db/database.js';
 import type { Tweet } from '../../src/domain/tweet.js';
 import { TweetRepository } from '../../src/repositories/tweet-repository.js';
 import { WatchRepository } from '../../src/repositories/watch-repository.js';
+import { NotFoundError } from '../../src/services/errors.js';
 import { SqliteMonitorService } from '../../src/services/monitor-service.js';
 import type { ToasterTweetResponse } from '../../src/tweettoaster/types.js';
 import { toasterResponse, toasterStatus } from '../helpers/tweettoaster-fixtures.js';
@@ -258,5 +259,28 @@ describe('MonitorService（规格 §5 / §6 / §7 / §8）', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(f.getTimeline).not.toHaveBeenCalled();
     f.monitor.stop();
+  });
+
+  it('refresh：指定账号只刷该账号，未指定刷新全部启用账户；未知账号抛 NotFoundError', async () => {
+    testDb = createTestDb();
+    const f = createMonitor(testDb.app, {
+      responder: async (screenName) => timelineOf(screenName, [`${screenName}100`, `${screenName}200`]),
+    });
+    f.watch.create('foo');
+    f.watch.create('bar');
+
+    const single = await f.monitor.refresh('foo');
+    expect(single).toHaveLength(1);
+    expect(single[0]?.screenName).toBe('foo');
+    expect(single[0]?.timelineCount).toBe(2);
+    expect(f.getTimeline).toHaveBeenCalledTimes(1);
+    expect(f.getTimeline).toHaveBeenLastCalledWith('foo');
+
+    f.getTimeline.mockClear();
+    const all = await f.monitor.refresh();
+    expect(all.map((r) => r.screenName).sort()).toEqual(['bar', 'foo']);
+    expect(f.getTimeline).toHaveBeenCalledTimes(2);
+
+    await expect(f.monitor.refresh('ghost')).rejects.toBeInstanceOf(NotFoundError);
   });
 });

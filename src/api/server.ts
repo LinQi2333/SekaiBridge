@@ -118,6 +118,23 @@ export function createApiServer(options: ApiServerOptions): http.Server {
     return identity;
   }
 
+  /** 解析账号参数：显式指定则校验已监听，否则使用默认账号。 */
+  function resolveAccountName(q: URLSearchParams): string {
+    const explicit = q.get('account');
+    if (explicit && explicit.trim()) {
+      const name = explicit.trim().toLowerCase().replace(/^@+/, '');
+      if (!services.watch.list().some((a) => a.screenName === name)) {
+        throw new ApiError(404, 'NOT_FOUND', `账号未在监听: @${name}`);
+      }
+      return name;
+    }
+    const def = services.watch.getDefault();
+    if (!def) {
+      throw new ApiError(400, 'NO_DEFAULT_ACCOUNT', '未设置默认账号，请用 !监听 默认 @账号 指定');
+    }
+    return def.screenName;
+  }
+
   async function readBody(req: http.IncomingMessage): Promise<unknown> {
     const chunks: Buffer[] = [];
     let size = 0;
@@ -227,16 +244,42 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         const screenName = decodeURIComponent(accountMatch[1] ?? '');
         if (method === 'PATCH') {
           authorize(req, 'admin');
-          const body = (await readBody(req)) as { enabled?: unknown };
+          const body = (await readBody(req)) as { enabled?: unknown; default?: unknown };
+          if (body.default === true) {
+            ok(res, { account: services.watch.setDefault(screenName) });
+            return;
+          }
           const account = body.enabled ? services.watch.enable(screenName) : services.watch.disable(screenName);
           ok(res, { account });
           return;
         }
         if (method === 'DELETE') {
           authorize(req, 'admin');
-          ok(res, { removed: services.watch.remove(screenName) });
+          ok(res, services.watch.remove(screenName));
           return;
         }
+      }
+
+      // ---- 立即刷新（规格 §8 手动轮询，管理员）----
+      if (method === 'POST' && pathname === '/api/refresh') {
+        authorize(req, 'admin');
+        const body = (await readBody(req)) as { account?: unknown };
+        const account =
+          typeof body.account === 'string' && body.account.trim()
+            ? body.account.trim().replace(/^@+/, '')
+            : undefined;
+        const results = await services.monitor.refresh(account);
+        ok(res, {
+          results: results.map((r) => ({
+            screenName: r.screenName,
+            mode: r.mode,
+            timelineCount: r.timelineCount,
+            newTweets: r.newTweets.map((t) => ({ id: t.id, seq: t.seq })),
+            duplicateCount: r.duplicateCount,
+            error: r.error,
+          })),
+        });
+        return;
       }
 
       // ---- 任务列表 / 多条查看（§26 / §27，成员）----
@@ -258,11 +301,26 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         const filter = parseListFilter(q.get('status'));
         const page = Number.parseInt(q.get('page') ?? '1', 10);
         const pageSize = Number.parseInt(q.get('page_size') ?? '20', 10);
-        const result = services.tweetQuery.list(filter, { page, pageSize });
+        const accountName = resolveAccountName(q);
+        const result = services.tweetQuery.list(filter, { page, pageSize, account: accountName });
         for (const item of result.items) {
           resolveTweetMediaPaths(item as unknown as Record<string, unknown>, config.cacheRoot);
         }
-        ok(res, result);
+        ok(res, { ...result, account: accountName });
+        return;
+      }
+
+      // ---- 单条解析（账号内编号 seq；账号缺省用默认账号）----
+      if (method === 'GET' && pathname === '/api/tweets/resolve') {
+        authorize(req, 'member');
+        const seq = Number.parseInt(q.get('seq') ?? '', 10);
+        if (!Number.isInteger(seq) || seq < 1) {
+          throw new ApiError(400, 'BAD_PARAM', '无效的 seq');
+        }
+        const accountName = resolveAccountName(q);
+        const tweet = services.tweetQuery.getByAccountAndSeq(accountName, seq);
+        resolveTweetMediaPaths(tweet as unknown as Record<string, unknown>, config.cacheRoot);
+        ok(res, { tweet, format: { view: formatTweetView(tweet) } });
         return;
       }
 

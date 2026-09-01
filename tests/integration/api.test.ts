@@ -60,7 +60,10 @@ async function startServer(overrides: Partial<AppConfig> = {}): Promise<void> {
     ...overrides,
   });
   const repos = createRepositories(testDb.app.db);
-  const fakeToaster = { health: vi.fn(async () => ({ status: 'ok', version: '2.0.0' })) };
+  const fakeToaster = {
+    health: vi.fn(async () => ({ status: 'ok', version: '2.0.0' })),
+    getTimeline: vi.fn(async () => ({ mode: 'timeline', query: {}, tweets: [] })),
+  };
   mockPublish = {
     publish: vi.fn(async (tweetId: number, topicAlias?: string): Promise<PublishResult> => ({
       published: true,
@@ -160,6 +163,15 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
 
   it('/列表 与 /查看（规格 §26 / §27，不含原文正文）', async () => {
     const repos = createRepositories(testDb!.app.db);
+    // 需要一个默认账号（首个监听账号自动成为默认）
+    const addAccount = await api('/api/watched-accounts', {
+      method: 'POST',
+      token: TOKEN,
+      user: ADMIN,
+      group: GROUP,
+      body: { screen_name: 'example' },
+    });
+    expect(addAccount.status).toBe(200);
     const t1 = repos.tweets.create(tweetInput({ xTweetId: '100' }));
     repos.tweets.updateWorkflowStatus(t1.id, WorkflowStatus.TRANSLATED);
     const t2 = repos.tweets.create(tweetInput({ xTweetId: '200' }));
@@ -167,12 +179,13 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
     const list = await api('/api/tweets?status=translated', { token: TOKEN, user: MEMBER, group: GROUP });
     expect(list.status).toBe(200);
     expect((list.json.data as { total: number }).total).toBe(1);
+    expect((list.json.data as { account: string }).account).toBe('example');
 
     const view = await api(`/api/tweets/${t2.id}`, { token: TOKEN, user: MEMBER, group: GROUP });
     expect(view.status).toBe(200);
-    const viewData = view.json.data as { tweet: { id: number }; format: { view: string } };
+    const viewData = view.json.data as { tweet: { id: number; seq: number }; format: { view: string } };
     expect(viewData.tweet.id).toBe(t2.id);
-    expect(viewData.format.view).toContain(`#${t2.id}`);
+    expect(viewData.format.view).toContain(`#${viewData.tweet.seq}`);
     expect(viewData.format.view).toContain('https://x.com/example/status/');
     expect(viewData.format.view).not.toContain('頑張る'); // 原文正文不出现
 
@@ -416,5 +429,149 @@ describe('HTTP API（NoneBot2 方案，规格 §2.2 / §41 / §57）', () => {
       body: '{bad json',
     });
     expect(res.status).toBe(400);
+  });
+
+  it('默认账号：PATCH default 切换，列表未指定账号用默认，指定 account 用指定', async () => {
+    // 添加两个账号（首个 foo 自动默认）
+    const addFoo = await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'foo' },
+    });
+    expect(addFoo.status).toBe(200);
+    const addBar = await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'bar' },
+    });
+    expect(addBar.status).toBe(200);
+
+    const repos = createRepositories(testDb!.app.db);
+    repos.tweets.create(tweetInput({ xTweetId: '100', authorScreenName: 'foo' }));
+    repos.tweets.updateWorkflowStatus(
+      repos.tweets.findByXId('100')!.id, WorkflowStatus.TRANSLATED,
+    );
+    repos.tweets.create(tweetInput({ xTweetId: '200', authorScreenName: 'bar' }));
+    repos.tweets.updateWorkflowStatus(
+      repos.tweets.findByXId('200')!.id, WorkflowStatus.TRANSLATED,
+    );
+
+    // 未指定账号 → 默认账号 foo
+    const list = await api('/api/tweets?status=translated', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(list.status).toBe(200);
+    const data = list.json.data as { account: string; total: number };
+    expect(data.account).toBe('foo');
+    expect(data.total).toBe(1);
+
+    // 指定 account=bar
+    const listBar = await api('/api/tweets?status=translated&account=bar', {
+      token: TOKEN, user: MEMBER, group: GROUP,
+    });
+    expect((listBar.json.data as { account: string; total: number }).account).toBe('bar');
+    expect((listBar.json.data as { total: number }).total).toBe(1);
+
+    // 切换默认账号
+    const setDefault = await api('/api/watched-accounts/bar', {
+      method: 'PATCH', token: TOKEN, user: ADMIN, group: GROUP, body: { default: true },
+    });
+    expect(setDefault.status).toBe(200);
+    const list2 = await api('/api/tweets?status=translated', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect((list2.json.data as { account: string }).account).toBe('bar');
+
+    // 指定未监听账号 → 404
+    const bad = await api('/api/tweets?account=ghost', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(bad.status).toBe(404);
+  });
+
+  it('seq 解析：账号内编号按默认/指定账号解析（/api/tweets/resolve）', async () => {
+    await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'foo' },
+    });
+    await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'bar' },
+    });
+    const repos = createRepositories(testDb!.app.db);
+    const t1 = repos.tweets.create(tweetInput({ xTweetId: '100', authorScreenName: 'foo' }));
+    repos.tweets.create(tweetInput({ xTweetId: '200', authorScreenName: 'foo' }));
+    repos.tweets.create(tweetInput({ xTweetId: '300', authorScreenName: 'bar' }));
+
+    // 默认账号 foo 的 #2
+    const r1 = await api('/api/tweets/resolve?seq=2', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(r1.status).toBe(200);
+    expect((r1.json.data as { tweet: { id: number; seq: number } }).tweet.id).toBe(
+      repos.tweets.findByXId('200')!.id,
+    );
+
+    // 指定账号 bar 的 #1
+    const r2 = await api('/api/tweets/resolve?seq=1&account=bar', {
+      token: TOKEN, user: MEMBER, group: GROUP,
+    });
+    expect((r2.json.data as { tweet: { xTweetId: string } }).tweet.xTweetId).toBe('300');
+
+    // 不存在的编号 → 404
+    const r3 = await api('/api/tweets/resolve?seq=99', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(r3.status).toBe(404);
+
+    // 未设置默认账号时 seq 解析报错（删光全部账号后无默认）
+    await api('/api/watched-accounts/foo', { method: 'DELETE', token: TOKEN, user: ADMIN, group: GROUP });
+    await api('/api/watched-accounts/bar', { method: 'DELETE', token: TOKEN, user: ADMIN, group: GROUP });
+    const r4 = await api('/api/tweets/resolve?seq=1', { token: TOKEN, user: MEMBER, group: GROUP });
+    expect(r4.status).toBe(400);
+    expect((r4.json.error as { code: string }).code).toBe('NO_DEFAULT_ACCOUNT');
+    void t1;
+  });
+
+  it('删除监听：连带清空该账号历史推文（API 级）', async () => {
+    await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'foo' },
+    });
+    await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'bar' },
+    });
+    const repos = createRepositories(testDb!.app.db);
+    repos.tweets.create(tweetInput({ xTweetId: '100', authorScreenName: 'foo' }));
+    repos.tweets.create(tweetInput({ xTweetId: '200', authorScreenName: 'foo' }));
+    repos.tweets.create(tweetInput({ xTweetId: '300', authorScreenName: 'bar' }));
+
+    const del = await api('/api/watched-accounts/foo', {
+      method: 'DELETE', token: TOKEN, user: ADMIN, group: GROUP,
+    });
+    expect(del.status).toBe(200);
+    expect((del.json.data as { removed: boolean; tweetsDeleted: number })).toMatchObject({
+      removed: true,
+      tweetsDeleted: 2,
+    });
+    expect(repos.tweets.count({ filter: 'all' })).toBe(1);
+    expect(repos.tweets.findByXId('300')?.authorScreenName).toBe('bar');
+  });
+
+  it('立即刷新：POST /api/refresh（管理员），指定账号/全部', async () => {
+    const addFoo = await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'foo' },
+    });
+    expect(addFoo.status).toBe(200);
+    const addBar = await api('/api/watched-accounts', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { screen_name: 'bar' },
+    });
+    expect(addBar.status).toBe(200);
+
+    // 成员 403
+    const forbidden = await api('/api/refresh', {
+      method: 'POST', token: TOKEN, user: MEMBER, group: GROUP, body: {},
+    });
+    expect(forbidden.status).toBe(403);
+
+    // 管理员刷新全部
+    const all = await api('/api/refresh', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: {},
+    });
+    expect(all.status).toBe(200);
+    const results = (all.json.data as { results: { screenName: string; mode: string }[] }).results;
+    expect(results.map((r) => r.screenName).sort()).toEqual(['bar', 'foo']);
+    expect(results.every((r) => r.mode === 'bootstrap')).toBe(true);
+
+    // 指定账号
+    const single = await api('/api/refresh', {
+      method: 'POST', token: TOKEN, user: ADMIN, group: GROUP, body: { account: 'foo' },
+    });
+    expect(
+      (single.json.data as { results: { screenName: string }[] }).results.map((r) => r.screenName),
+    ).toEqual(['foo']);
   });
 });

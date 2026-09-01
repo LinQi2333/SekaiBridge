@@ -15,6 +15,7 @@ import {
 function makeTweet(overrides: Partial<Tweet> = {}): Tweet {
   return {
     id: 152,
+    seq: 152,
     xTweetId: '1890000000000000000',
     authorScreenName: 'example',
     authorName: 'Example Channel',

@@ -4,6 +4,8 @@ export interface WatchedAccount {
   screenName: string;
   enabled: boolean;
   bootstrapCompleted: boolean;
+  /** 是否默认账号：列表/刷新等命令未指定账号时使用（全局唯一）。 */
+  isDefault: boolean;
   createdAt: string;
   updatedAt: string;
 }
