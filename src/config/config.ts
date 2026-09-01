@@ -44,6 +44,11 @@ export interface AppConfig {
   biliSessdata: string;
   biliJct: string;
   biliDedeuserid: string;
+  /**
+   * 完整 Cookie 串（可选）：浏览器登录后复制的全部 Cookie（含 buvid3/buvid4/b_lsid 等指纹）。
+   * 配置后优先于上面三项使用，请求形态更接近真实浏览器，降低风控概率。
+   */
+  biliCookieString: string;
 
   /** 发布模式：MVP 仅 manual。 */
   publishMode: 'manual';
@@ -112,6 +117,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliSessdata: env.BILI_SESSDATA ?? '',
     biliJct: env.BILI_JCT ?? '',
     biliDedeuserid: env.BILI_DEDEUSERID ?? '',
+    biliCookieString: env.BILI_COOKIE_STRING ?? '',
     publishMode,
     apiPort: parseIntStrict(env.API_PORT, 18080, 'API_PORT'),
     apiToken: env.API_TOKEN ?? '',

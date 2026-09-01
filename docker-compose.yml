@@ -45,6 +45,7 @@ services:
       - BILI_SESSDATA=${BILI_SESSDATA:-}
       - BILI_JCT=${BILI_JCT:-}
       - BILI_DEDEUSERID=${BILI_DEDEUSERID:-}
+      - BILI_COOKIE_STRING=${BILI_COOKIE_STRING:-}
       - PUBLISH_MODE=manual
       - API_PORT=18080
       - API_TOKEN=${API_TOKEN:-}

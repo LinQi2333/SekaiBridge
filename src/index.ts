@@ -30,6 +30,8 @@ function main(): void {
       jct: config.biliJct,
       dedeuserid: config.biliDedeuserid,
     },
+    // 完整 Cookie 串（含 buvid 等指纹）优先，更贴近真实浏览器
+    cookieString: config.biliCookieString,
   });
   const services = createServices(repos, {
     config,

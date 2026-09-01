@@ -11,6 +11,11 @@ export interface BilibiliCookie {
 
 export interface BilibiliClientOptions {
   cookie: BilibiliCookie;
+  /**
+   * 完整 Cookie 串（可选）：浏览器 DevTools 复制的全部 Cookie（含 buvid3/buvid4/b_lsid 等指纹）。
+   * 提供后优先使用；否则回退到 cookie 三件套。
+   */
+  cookieString?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   /** wbi key 缓存有效期（毫秒），默认 1 小时。 */
@@ -43,6 +48,7 @@ const AUTH_CODES = new Set([-101, -111, -352, -412]);
  */
 export class BilibiliClient {
   private readonly cookie: BilibiliCookie;
+  private readonly cookieString: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly wbiCacheTtlMs: number;
@@ -50,6 +56,7 @@ export class BilibiliClient {
 
   constructor(options: BilibiliClientOptions) {
     this.cookie = options.cookie;
+    this.cookieString = options.cookieString ?? '';
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.wbiCacheTtlMs = options.wbiCacheTtlMs ?? 60 * 60 * 1000;
@@ -57,6 +64,9 @@ export class BilibiliClient {
 
   /** 是否已配置完整 Cookie（未配置时所有接口都会报登录失效）。 */
   hasCookie(): boolean {
+    if (this.cookieString.trim()) {
+      return true;
+    }
     return Boolean(this.cookie.sessdata && this.cookie.jct && this.cookie.dedeuserid);
   }
 
@@ -176,7 +186,19 @@ export class BilibiliClient {
         ...init,
         headers: {
           cookie: this.#cookieHeader(),
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          // 以下头尽可能贴近真实浏览器（Chrome/Windows，t.bilibili.com 动态编辑器），
+          // 与 wbi 签名配合降低风控误判
+          'user-agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          accept: 'application/json, text/plain, */*',
+          'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+          'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="126", "Google Chrome";v="126"',
+          'sec-ch-ua-mobile': '?0',
+          'sec-ch-ua-platform': '"Windows"',
+          'sec-fetch-dest': 'empty',
+          'sec-fetch-mode': 'cors',
+          'sec-fetch-site': 'same-site',
+          origin: 'https://t.bilibili.com',
           referer: 'https://t.bilibili.com/',
           ...init.headers,
         },
@@ -216,6 +238,9 @@ export class BilibiliClient {
   }
 
   #cookieHeader(): string {
+    if (this.cookieString.trim()) {
+      return this.cookieString.trim();
+    }
     return [
       `SESSDATA=${this.cookie.sessdata}`,
       `bili_jct=${this.cookie.jct}`,

@@ -137,6 +137,44 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     expect(body.dyn_req.topic).toMatchObject({ id: 23456, name: 'hololive' });
   });
 
+  it('完整 Cookie 串优先：hasCookie 为真，请求头带完整串（含指纹）', async () => {
+    const cookieString =
+      'SESSDATA=s; bili_jct=j; DedeUserID=1; buvid3=abc123; b_nut=1700000000; b_lsid=xyz';
+    let uploadInit: RequestInit | undefined;
+    const fetchImpl = mockFetch({
+      'https://api.bilibili.com/x/web-interface/nav': () => jsonResponse(NAV_OK),
+      'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': (init) => {
+        uploadInit = init;
+        return jsonResponse({
+          code: 0,
+          message: '0',
+          data: {
+            image_url: 'https://i0.hdslb.com/bfs/article/x.jpg',
+            image_width: 1280,
+            image_height: 1406,
+            img_size: 100,
+          },
+        });
+      },
+    });
+    // 三件套为空也视为已配置（完整串优先）
+    const client = new BilibiliClient({
+      cookie: { sessdata: '', jct: '', dedeuserid: '' },
+      cookieString,
+      fetchImpl,
+    });
+    expect(client.hasCookie()).toBe(true);
+
+    await client.uploadImage(Buffer.from([1]), 'a.jpg');
+    const headers = uploadInit?.headers as Record<string, string> | undefined;
+    expect(headers?.cookie).toBe(cookieString);
+    // 浏览器风格头存在
+    expect(headers?.['sec-ch-ua']).toContain('Chromium');
+    expect(headers?.['sec-fetch-mode']).toBe('cors');
+    expect(headers?.origin).toBe('https://t.bilibili.com');
+    expect(headers?.['user-agent']).toContain('Chrome/126');
+  });
+
   it('登录失效：业务 code -101 → BilibiliAuthError（§54-18 Cookie 过期）', async () => {
     const fetchImpl = mockFetch({
       'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': () =>
