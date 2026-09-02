@@ -49,6 +49,11 @@ export interface AppConfig {
    * 配置后优先于上面三项使用，请求形态更接近真实浏览器，降低风控概率。
    */
   biliCookieString: string;
+  /**
+   * Cookie 持久化文件（自动续期写入用）。B 站返回的新 cookie（如 bili_ticket）
+   * 会写回该文件并在下次启动时优先读取；默认放在数据库同目录。
+   */
+  biliCookieFile: string;
 
   /** 发布模式：MVP 仅 manual。 */
   publishMode: 'manual';
@@ -118,6 +123,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliJct: env.BILI_JCT ?? '',
     biliDedeuserid: env.BILI_DEDEUSERID ?? '',
     biliCookieString: env.BILI_COOKIE_STRING ?? '',
+    biliCookieFile: env.BILI_COOKIE_FILE ?? path.join(path.dirname(path.resolve(env.DATABASE_PATH ?? './data/app.db')), 'bili-cookies.json'),
     publishMode,
     apiPort: parseIntStrict(env.API_PORT, 18080, 'API_PORT'),
     apiToken: env.API_TOKEN ?? '',

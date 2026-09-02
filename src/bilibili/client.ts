@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { createHmac } from 'node:crypto';
 import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from './errors.js';
 import type { UploadedImage } from './image-upload.js';
 import { extractKeyFromImageUrl, signWbi, type WbiSignResult } from './wbi.js';
@@ -16,6 +19,11 @@ export interface BilibiliClientOptions {
    * 提供后优先使用；否则回退到 cookie 三件套。
    */
   cookieString?: string;
+  /**
+   * Cookie 持久化文件（可选）：自动续期（bili_ticket 等）得到的新值写回该文件，
+   * 启动时优先读取文件（文件优先于 env，保证续期结果跨重启保留）。
+   */
+  cookieFile?: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   /** wbi key 缓存有效期（毫秒），默认 1 小时。 */
@@ -36,6 +44,10 @@ interface BiliResponse {
 const NAV_URL = 'https://api.bilibili.com/x/web-interface/nav';
 const IMAGE_UPLOAD_URL = 'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs';
 const DYNAMIC_CREATE_URL = 'https://api.bilibili.com/x/dynamic/feed/create/dyn';
+const TICKET_URL = 'https://api.bilibili.com/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket';
+const COOKIE_INFO_URL = 'https://passport.bilibili.com/x/passport-login/web/cookie/info';
+// GenWebTicket 的 hmac key（公开于 bilibili-API-collect）
+const TICKET_HMAC_KEY = 'XgwSnGZ1p';
 
 const BROWSER_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
@@ -51,7 +63,8 @@ const AUTH_CODES = new Set([-101, -111, -352, -412]);
  */
 export class BilibiliClient {
   private readonly cookie: BilibiliCookie;
-  private readonly cookieString: string;
+  private cookieString: string;
+  private readonly cookieFile: string | null;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly wbiCacheTtlMs: number;
@@ -59,7 +72,13 @@ export class BilibiliClient {
 
   constructor(options: BilibiliClientOptions) {
     this.cookie = options.cookie;
-    this.cookieString = options.cookieString ?? '';
+    this.cookieFile = options.cookieFile ?? null;
+    // 优先读取持久化文件（续期结果跨重启保留），否则用 env 初值
+    const fromFile = this.#loadCookieFromFile();
+    this.cookieString = fromFile ?? options.cookieString ?? '';
+    if (this.cookieFile && !fromFile && this.cookieString.trim()) {
+      this.#saveCookieFile();
+    }
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.wbiCacheTtlMs = options.wbiCacheTtlMs ?? 60 * 60 * 1000;
@@ -257,5 +276,108 @@ export class BilibiliClient {
       `bili_jct=${this.cookie.jct}`,
       `DedeUserID=${this.cookie.dedeuserid}`,
     ].join('; ');
+  }
+
+  // ---------- 会话体检 / bili_ticket 自动续期 ----------
+
+  /**
+   * 检查当前会话：是否登录、B 站是否提示需要刷新（SESSDATA 临近过期）。
+   * 纯查询接口，不产生任何内容。
+   */
+  async checkSession(): Promise<{ loggedIn: boolean; uname: string | null; refreshNeeded: boolean }> {
+    let loggedIn = false;
+    let uname: string | null = null;
+    try {
+      const navPayload = await this.#request(NAV_URL, {});
+      const navData = navPayload.data as { isLogin?: boolean; uname?: string } | undefined;
+      loggedIn = navData?.isLogin === true;
+      uname = navData?.uname ?? null;
+    } catch (error) {
+      if (error instanceof BilibiliAuthError) {
+        return { loggedIn: false, uname: null, refreshNeeded: false };
+      }
+      throw error;
+    }
+    let refreshNeeded = false;
+    try {
+      const payload = await this.#request(
+        `${COOKIE_INFO_URL}?csrf=${encodeURIComponent(this.#jct())}`,
+        {},
+      );
+      refreshNeeded = (payload.data as { refresh?: boolean } | undefined)?.refresh === true;
+    } catch {
+      // cookie/info 失败（如被风控）不影响主结论
+    }
+    return { loggedIn, uname, refreshNeeded };
+  }
+
+  /**
+   * 刷新 bili_ticket（官方 GenWebTicket，浏览器同款），并把新值写回 cookie。
+   * 返回新 ticket 与过期时间（秒）；失败返回 null（保持旧值）。
+   */
+  async refreshTicket(): Promise<{ ticket: string; expiresAt: number } | null> {
+    const ts = Math.floor(Date.now() / 1000);
+    const hexsign = createHmac('sha256', TICKET_HMAC_KEY).update(`ts${ts}`).digest('hex');
+    const params = new URLSearchParams({
+      key_id: 'ec02',
+      hexsign,
+      'context[ts]': String(ts),
+      csrf: this.#jct(),
+    });
+    const payload = await this.#request(`${TICKET_URL}?${params.toString()}`, { method: 'POST' });
+    const data = payload.data as { ticket?: string; created_at?: number; ttl?: number } | undefined;
+    if (!data?.ticket) {
+      return null;
+    }
+    const expiresAt = (data.created_at ?? ts) + (data.ttl ?? 0);
+    this.#setCookiePair('bili_ticket', data.ticket);
+    this.#setCookiePair('bili_ticket_expires', String(expiresAt));
+    return { ticket: data.ticket, expiresAt };
+  }
+
+  /** 替换（或追加）cookie 串中的某个 name=value 并持久化。 */
+  #setCookiePair(name: string, value: string): void {
+    const pattern = new RegExp(`(?:^|;\\s*)${name}=[^;]*`);
+    if (pattern.test(this.cookieString)) {
+      this.cookieString = this.cookieString.replace(pattern, `${name}=${value}`);
+    } else {
+      const base = this.cookieString.trim();
+      this.cookieString = base.length > 0 ? `${base}; ${name}=${value}` : `${name}=${value}`;
+    }
+    this.#saveCookieFile();
+  }
+
+  #loadCookieFromFile(): string | null {
+    if (!this.cookieFile) return null;
+    try {
+      if (!fs.existsSync(this.cookieFile)) return null;
+      const parsed = JSON.parse(fs.readFileSync(this.cookieFile, 'utf8')) as {
+        cookieString?: string;
+      };
+      const value = parsed.cookieString?.trim();
+      if (value && /SESSDATA=/.test(value) && /bili_jct=/.test(value)) {
+        return value;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  #saveCookieFile(): void {
+    if (!this.cookieFile) return;
+    try {
+      fs.mkdirSync(path.dirname(this.cookieFile), { recursive: true });
+      fs.writeFileSync(
+        this.cookieFile,
+        JSON.stringify(
+          { cookieString: this.cookieString, updatedAt: new Date().toISOString() },
+          null,
+          2,
+        ),
+      );
+    } catch (error) {
+      console.error('[bilibili] cookie 文件写入失败:', error);
+    }
   }
 }

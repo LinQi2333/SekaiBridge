@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { BilibiliClient } from '../../../src/bilibili/client.js';
 import {
@@ -214,5 +217,94 @@ describe('BilibiliClient（规格 §36 / §40）', () => {
     });
     const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
     await expect(client.publishDynamic({ text: 'x' })).rejects.toBeInstanceOf(BilibiliNetworkError);
+  });
+
+  it('checkSession：nav isLogin 判断登录态；cookie/info 提示刷新', async () => {
+    const fetchImpl = mockFetch({
+      'https://api.bilibili.com/x/web-interface/nav': () =>
+        jsonResponse({ code: 0, message: '0', data: { isLogin: true, uname: '某资讯站' } }),
+      'https://passport.bilibili.com/x/passport-login/web/cookie/info': () =>
+        jsonResponse({ code: 0, message: '0', data: { refresh: false, timestamp: 0 } }),
+    });
+    const client = new BilibiliClient({ cookie: COOKIE, fetchImpl });
+    await expect(client.checkSession()).resolves.toMatchObject({
+      loggedIn: true,
+      uname: '某资讯站',
+      refreshNeeded: false,
+    });
+  });
+
+  it('refreshTicket：签名参数正确 + 更新 bili_ticket 并持久化到文件', async () => {
+    const FULL = 'SESSDATA=s; bili_jct=j; DedeUserID=1; bili_ticket=old; bili_ticket_expires=1';
+    let ticketUrl = '';
+    const fetchImpl = mockFetch({
+      'https://api.bilibili.com/x/web-interface/nav': () => jsonResponse(NAV_OK),
+      'https://api.bilibili.com/bapis/bilibili.api.ticket.v1.Ticket/GenWebTicket': (_init, url) => {
+        ticketUrl = String(url);
+        return jsonResponse({
+          code: 0,
+          message: 'OK',
+          data: { ticket: 'new-ticket-value', created_at: 1000, ttl: 259200 },
+        });
+      },
+    });
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tqb-cookie-')), 'cookies.json');
+    const client = new BilibiliClient({ cookie: COOKIE, cookieString: FULL, cookieFile: file, fetchImpl });
+
+    const result = await client.refreshTicket();
+    expect(result).toEqual({ ticket: 'new-ticket-value', expiresAt: 260200 });
+    expect(ticketUrl).toContain('key_id=ec02');
+    expect(ticketUrl).toMatch(/hexsign=[0-9a-f]{64}/);
+    expect(ticketUrl).toContain('csrf=j');
+
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as { cookieString: string };
+    expect(saved.cookieString).toContain('bili_ticket=new-ticket-value');
+    expect(saved.cookieString).toContain('bili_ticket_expires=260200');
+    expect(saved.cookieString).toContain('SESSDATA=s');
+  });
+
+  it('cookie 文件优先于 env：续期结果跨重启保留', async () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'tqb-cookie-')), 'cookies.json');
+    // 首次：env 初值写入文件
+    new BilibiliClient({
+      cookie: COOKIE,
+      cookieString: 'SESSDATA=s; bili_jct=j; DedeUserID=1',
+      cookieFile: file,
+      fetchImpl: vi.fn(),
+    });
+    expect(fs.existsSync(file)).toBe(true);
+    // 模拟续期后文件内容
+    fs.writeFileSync(
+      file,
+      JSON.stringify({ cookieString: 'SESSDATA=s; bili_jct=j; DedeUserID=1; bili_ticket=stored' }),
+    );
+    // 新实例（env 无 ticket）读到文件里的 stored
+    const client = new BilibiliClient({
+      cookie: COOKIE,
+      cookieString: 'SESSDATA=s; bili_jct=j; DedeUserID=1',
+      cookieFile: file,
+      fetchImpl: vi.fn(),
+    });
+    expect(client.hasCookie()).toBe(true);
+    // 通过一次带 cookie 的请求验证内部用的是文件值
+    let sentCookie = '';
+    const fetchImpl2 = mockFetch({
+      'https://api.bilibili.com/x/dynamic/feed/draw/upload_bfs': (init) => {
+        sentCookie = String((init.headers as Record<string, string>).cookie);
+        return jsonResponse({
+          code: 0,
+          message: '0',
+          data: { image_url: 'https://i0.hdslb.com/bfs/article/x.jpg', image_width: 1, image_height: 1, img_size: 1 },
+        });
+      },
+    });
+    const client2 = new BilibiliClient({
+      cookie: COOKIE,
+      cookieString: 'SESSDATA=s; bili_jct=j; DedeUserID=1',
+      cookieFile: file,
+      fetchImpl: fetchImpl2,
+    });
+    await client2.uploadImage(Buffer.from([1]), 'a.jpg'); // 触发 nav(wbi) 请求
+    expect(sentCookie).toContain('bili_ticket=stored');
   });
 });

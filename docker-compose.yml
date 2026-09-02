@@ -49,6 +49,8 @@ services:
       - BILI_JCT=${BILI_JCT:-}
       - BILI_DEDEUSERID=${BILI_DEDEUSERID:-}
       - BILI_COOKIE_STRING=${BILI_COOKIE_STRING:-}
+      # 可选：cookie 持久化文件（默认 /app/data/bili-cookies.json，与数据库同卷）
+      - BILI_COOKIE_FILE=${BILI_COOKIE_FILE:-}
       - PUBLISH_MODE=manual
       - API_PORT=18080
       - API_TOKEN=${API_TOKEN:-}
