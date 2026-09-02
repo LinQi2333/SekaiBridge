@@ -13,8 +13,7 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "backfill:screenshots": "node dist/scripts/backfill-screenshots.js"
+    "test:watch": "vitest"
   },
   "keywords": [
     "twitter",
