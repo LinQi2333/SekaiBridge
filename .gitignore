@@ -4,22 +4,9 @@ node_modules/
 # build output
 dist/
 
-# runtime data
-data/*
-cache/*
-!cache/.gitkeep
-!cache/screenshots/
-!cache/twitter-photos/
-!cache/video-thumbnails/
-cache/screenshots/*
-cache/twitter-photos/*
-cache/video-thumbnails/*
-!cache/screenshots/.gitkeep
-!cache/twitter-photos/.gitkeep
-!cache/video-thumbnails/.gitkeep
-
-# keep empty directories tracked
-!data/.gitkeep
+# runtime data（应用运行时自建目录，不入库）
+data/
+cache/
 
 # env / secrets
 .env
@@ -30,14 +17,18 @@ cache/video-thumbnails/*
 logs/
 *.log
 
-# tests / coverage
+# tests（不入库；本地保留可运行 npm test）
+tests/
+vitest.config.ts
+
+# coverage
 coverage/
 
 # python (nonebot-plugin)
 __pycache__/
 *.pyc
 
-# sqlite artifacts (data/ is already ignored, keep for safety)
+# sqlite artifacts
 *.db
 *.db-wal
 *.db-shm

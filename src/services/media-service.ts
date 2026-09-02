@@ -99,10 +99,10 @@ export class DefaultMediaService implements MediaService {
 
 export class StubMediaService implements MediaService {
   cachePhotos(_tweetId: number): Promise<string[]> {
-    throw new NotImplementedError('MediaService（Phase 4）');
+    throw new NotImplementedError('MediaService 未接线');
   }
 
   cacheVideoThumbnails(_tweetId: number): Promise<string[]> {
-    throw new NotImplementedError('MediaService（Phase 4）');
+    throw new NotImplementedError('MediaService 未接线');
   }
 }

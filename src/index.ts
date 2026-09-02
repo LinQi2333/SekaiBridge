@@ -10,10 +10,8 @@ import { createRepositories, createServices } from './services/index.js';
 import { TweetToasterClient } from './tweettoaster/client.js';
 
 /**
- * 应用入口。
- * 已完成：P1 骨架、P2 TweetToaster Client、P3 Monitor、P4 截图/媒体、
- * P5 来源检查、P6 HTTP API（NoneBot2 方案）、P7 翻译/话题/工作流、P8 Bilibili 发布。
- * 后续阶段：完整集成测试（P9）、Docker/部署（P10）。
+ * 应用入口：启动数据库、监听/截图/来源检查服务、内部 HTTP API，
+ * 以及 Bilibili 会话体检与 bili_ticket 自动续期。
  */
 function main(): void {
   const config = loadConfigFromEnv();
@@ -45,7 +43,7 @@ function main(): void {
     },
   });
 
-  console.log('[boot] twitter-qq-bilibili (Phase 1-6)');
+  console.log('[boot] sekai-bridge');
   console.log(`[boot] database: ${config.databasePath} (migrations: ${database.appliedVersions().join(',')})`);
   console.log(`[boot] watched accounts: ${services.watch.list().length}`);
   console.log(`[boot] tweettoaster: ${config.tweettoasterUrl}`);

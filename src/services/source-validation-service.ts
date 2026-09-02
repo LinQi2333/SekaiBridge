@@ -35,7 +35,7 @@ export interface SourceValidationOptions {
   tweetToaster: SingleTweetSource;
   /** 检查间隔（毫秒），来自 SOURCE_CHECK_INTERVAL。 */
   checkIntervalMs: number;
-  /** 新标记为 SOURCE_DELETED 时的回调（Phase 6 可在此通知 QQ）。 */
+  /** 新标记为 SOURCE_DELETED 时的回调（可在此通知上游）。 */
   onDeleted?: (tweetIds: number[]) => void;
 }
 
@@ -124,19 +124,19 @@ export class DefaultSourceValidationService implements SourceValidationService {
 
 export class StubSourceValidationService implements SourceValidationService {
   checkDue(): Promise<number[]> {
-    throw new NotImplementedError('SourceValidationService（Phase 5）');
+    throw new NotImplementedError('SourceValidationService 未接线');
   }
 
   checkTweet(_tweetId: number): Promise<boolean> {
-    throw new NotImplementedError('SourceValidationService（Phase 5）');
+    throw new NotImplementedError('SourceValidationService 未接线');
   }
 
   start(): void {
-    throw new NotImplementedError('SourceValidationService（Phase 5）');
+    throw new NotImplementedError('SourceValidationService 未接线');
   }
 
   stop(): void {
-    throw new NotImplementedError('SourceValidationService（Phase 5）');
+    throw new NotImplementedError('SourceValidationService 未接线');
   }
 
   isRunning(): boolean {

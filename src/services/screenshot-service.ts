@@ -85,6 +85,6 @@ export function toPortablePath(p: string): string {
 
 export class StubScreenshotService implements ScreenshotService {
   render(_tweetId: number): Promise<string> {
-    throw new NotImplementedError('ScreenshotService（Phase 4）');
+    throw new NotImplementedError('ScreenshotService 未接线');
   }
 }

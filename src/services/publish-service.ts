@@ -175,10 +175,10 @@ export function filenameForPhoto(url: string, contentType: string): string {
 
 export class StubPublishService implements PublishService {
   publish(_tweetId: number, _topicAlias?: string): Promise<PublishResult> {
-    throw new NotImplementedError('PublishService（Phase 8）');
+    throw new NotImplementedError('PublishService 未接线');
   }
 
   isPublished(_tweetId: number): boolean {
-    throw new NotImplementedError('PublishService（Phase 8）');
+    throw new NotImplementedError('PublishService 未接线');
   }
 }

@@ -1,7 +1,7 @@
 /**
  * TweetToaster 客户端错误。
- * TweetNotFoundError 是 Phase 5 SOURCE_DELETED 检测的明确信号
- * （规格 §12：只有 Provider 明确返回 404 / tombstone / not found 才算删除）。
+ * TweetNotFoundError 是来源删除（SOURCE_DELETED）检测的明确信号：
+ * 只有 Provider 明确返回 404 / tombstone / not found 才算删除。
  */
 export class TweetToasterError extends Error {
   readonly status: number | null;

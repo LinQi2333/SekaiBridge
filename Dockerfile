@@ -24,7 +24,7 @@ ENV NODE_ENV=production
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
-# 运行时数据目录（可由 volume 挂载）
-RUN mkdir -p /app/data /app/cache
+# 运行时数据目录（app-data volume 挂载点）
+RUN mkdir -p /app/data
 EXPOSE 18080
 CMD ["node", "dist/index.js"]

@@ -34,7 +34,7 @@ export interface MonitorOptions {
   pollIntervalMs: number;
   /** 每账户轮询 jitter（毫秒，±），默认 10000（规格 §6 ±10 秒）。 */
   jitterMs?: number;
-  /** 增量检测到新推文时的回调（Phase 6 在此发送 QQ 通知）；支持异步。 */
+  /** 增量检测到新推文时的回调（截图/媒体/通知在此串联）；支持异步。 */
   onNewTweets?: (tweets: Tweet[]) => void | Promise<void>;
 }
 
@@ -232,19 +232,19 @@ export interface MonitorService {
 
 export class StubMonitorService implements MonitorService {
   start(): void {
-    throw new NotImplementedError('MonitorService（Phase 3）');
+    throw new NotImplementedError('MonitorService 未接线');
   }
 
   stop(): void {
-    throw new NotImplementedError('MonitorService（Phase 3）');
+    throw new NotImplementedError('MonitorService 未接线');
   }
 
   pollOnce(): Promise<MonitorPollResult[]> {
-    throw new NotImplementedError('MonitorService（Phase 3）');
+    throw new NotImplementedError('MonitorService 未接线');
   }
 
   refresh(_screenName?: string): Promise<MonitorPollResult[]> {
-    throw new NotImplementedError('MonitorService（Phase 3）');
+    throw new NotImplementedError('MonitorService 未接线');
   }
 
   isRunning(): boolean {
