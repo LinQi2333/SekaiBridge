@@ -114,7 +114,8 @@ export class BilibiliClient {
       throw new BilibiliApiError('图片上传成功但未返回图片地址', payload.code);
     }
     return {
-      url: imageUrl,
+      // create/dyn 校验图片地址协议，统一转 https（B 站可能返回 http://）
+      url: imageUrl.replace(/^http:\/\//i, 'https://'),
       width: data?.image_width ?? 0,
       height: data?.image_height ?? 0,
       sizeKb: data?.img_size ?? 0,
@@ -253,7 +254,8 @@ export class BilibiliClient {
       if (AUTH_CODES.has(payload.code)) {
         throw new BilibiliAuthError(`Bilibili 登录失效: ${message}`, payload.code);
       }
-      throw new BilibiliApiError(message, payload.code);
+      // 错误信息带 code，便于定位（如 -352 风控 / -400 参数）
+      throw new BilibiliApiError(`${message}（code=${payload.code}）`, payload.code);
     }
     return payload;
   }
