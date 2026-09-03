@@ -151,11 +151,13 @@ export class BilibiliClient {
       }));
     }
     if (input.topicId) {
+      // name 只在提供真实话题名时才发送：B 站会校验 name 与 topic_id 匹配，
+      // 别名/空名会导致 4126130"请求数据发生错误"
       dynReq.topic = {
         from_source: 'dyn.web.list',
         from_topic_id: 0,
         id: Number(input.topicId),
-        name: input.topicName ?? '',
+        ...(input.topicName ? { name: input.topicName } : {}),
       };
     }
     const wbi = await this.#signedParams({ csrf: this.#jct() });

@@ -130,8 +130,8 @@ export class DefaultPublishService implements PublishService {
         text: translation.text,
         pics,
         topicId: topic?.biliTopicId ?? null,
-        // 话题库已无 name 字段：create/dyn 按 id 挂话题，name 用别名占位
-        topicName: topic?.alias ?? null,
+        // 不传别名作话题名：B 站校验 name 与 topic_id 匹配，别名会导致 4126130
+        topicName: null,
       });
       const record = this.publishes.create({
         tweetId,
