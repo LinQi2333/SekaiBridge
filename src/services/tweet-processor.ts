@@ -56,11 +56,9 @@ export class DefaultNewTweetProcessor implements NewTweetProcessor {
         continue; // 截图失败不再处理媒体与通知
       }
 
-      // 2) 媒体缓存（photo / 视频封面；规格 §17 / §18 / §47）
-      let videoThumbnails: string[] = [];
+      // 2) 媒体缓存（仅 photo 原图；视频与封面一律不下载）
       try {
         await this.media.cachePhotos(tweet.id);
-        videoThumbnails = await this.media.cacheVideoThumbnails(tweet.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         log('tweet.media.failed', `#${tweet.id}: ${message}`);
@@ -75,7 +73,7 @@ export class DefaultNewTweetProcessor implements NewTweetProcessor {
               tweetId: tweet.id,
               text: formatNewTweetNotification(updated),
               screenshotPath: updated.screenshotPath,
-              videoThumbnails,
+              videoThumbnails: [],
             });
             log('qq.notification.created', `#${tweet.id}`);
           }

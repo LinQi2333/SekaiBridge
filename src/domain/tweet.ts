@@ -66,11 +66,7 @@ export function parseMedia(mediaJson: string | null): TweetMedia[] {
   }
 }
 
-export function hasVideo(tweet: Pick<Tweet, 'mediaJson'>): boolean {
-  return parseMedia(tweet.mediaJson).some((media) => media.type === 'video' || media.type === 'gif');
-}
-
-/** 只返回 photo 媒体（Bilibili 只上传 photo，规格 §21）。 */
+/** 只返回 photo 媒体（只发布 photo；视频与封面一律不下载，规格 §21）。 */
 export function photoMedia(tweet: Pick<Tweet, 'mediaJson'>): TweetMedia[] {
   return parseMedia(tweet.mediaJson).filter((media) => media.type === 'photo');
 }

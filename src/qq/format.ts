@@ -1,5 +1,4 @@
 import type { Tweet } from '../domain/tweet.js';
-import { hasVideo } from '../domain/tweet.js';
 import { SourceStatus } from '../domain/workflow.js';
 
 /**
@@ -46,11 +45,9 @@ export function sourceLabel(status: string): string {
 /**
  * 新推文自动通知文本（规格 §42 / §51）。
  * 不含 original_text；包含 local id、账号、时间、状态、推文 URL。
- * 视频推文追加"包含视频"提示（规格 §18 / §42 视频版）。
  */
 export function formatNewTweetNotification(tweet: Tweet): string {
-  const video = hasVideo(tweet);
-  const lines = [
+  return [
     `【新推文 #${tweet.seq}】`,
     '',
     `账号：@${tweet.authorScreenName}`,
@@ -59,15 +56,7 @@ export function formatNewTweetNotification(tweet: Tweet): string {
     '',
     '原推：',
     tweet.tweetUrl,
-  ];
-  if (video) {
-    lines.push(
-      '',
-      '⚠️ 此推文包含视频。',
-      '下方图片为视频默认封面，视频本体不会下载或转载。',
-    );
-  }
-  return lines.join('\n');
+  ].join('\n');
 }
 
 /** /查看 输出文本（规格 §27）：状态 + 原推链接，不含原文正文。 */

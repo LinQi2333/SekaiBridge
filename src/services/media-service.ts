@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Tweet } from '../domain/tweet.js';
-import { parseMedia, photoMedia } from '../domain/tweet.js';
+import { photoMedia } from '../domain/tweet.js';
 import { EXT_BY_CONTENT_TYPE, safeDownload } from '../media/safe-download.js';
 import type { MediaFetcher } from '../media/media-fetcher.js';
 import type { TweetRepository } from '../repositories/tweet-repository.js';
@@ -10,17 +10,14 @@ import { toPortablePath } from './screenshot-service.js';
 
 /**
  * 媒体处理（规格 §16 / §18 / §20 / §21 / §47 / §48）。
- * 三种资产严格分离（规格 §47）：
- * - cache/screenshots/<tweet-id>.png        推文截图（ScreenshotService 负责）
- * - cache/twitter-photos/<tweet-id>/<i>.<ext>   Twitter 原始 photo（Bilibili 发布用）
- * - cache/video-thumbnails/<tweet-id>/<i>.<ext> 视频默认封面（QQ 通知用）
- * 视频只下载默认封面，绝不下载视频本体（规格 §18 / §20）。
+ * 只缓存推文原图（最高画质），用于 Bilibili 发布：
+ * - cache/screenshots/<tweet-id>.png            推文截图（ScreenshotService 负责）
+ * - cache/twitter-photos/<tweet-id>/<i>.<ext>   Twitter 原图（photo，name=orig）
+ * 视频与视频封面一律不下载。
  */
 export interface MediaService {
-  /** 缓存推文的 photo 媒体，返回缓存文件路径列表。 */
+  /** 缓存推文的 photo 媒体（最高画质原图），返回缓存文件路径列表。 */
   cachePhotos(tweetId: number): Promise<string[]>;
-  /** 缓存推文视频的默认封面（不下载视频本体），返回封面路径列表。 */
-  cacheVideoThumbnails(tweetId: number): Promise<string[]>;
 }
 
 export interface MediaServiceOptions {
@@ -52,16 +49,8 @@ export class DefaultMediaService implements MediaService {
 
   async cachePhotos(tweetId: number): Promise<string[]> {
     const tweet = this.requireTweet(tweetId);
-    const media = photoMedia(tweet); // 只缓存 photo（规格 §21），视频封面不进入
+    const media = photoMedia(tweet); // 只缓存 photo（规格 §21），视频/封面一律不下载
     return this.downloadMedia(tweet, media, 'twitter-photos');
-  }
-
-  async cacheVideoThumbnails(tweetId: number): Promise<string[]> {
-    const tweet = this.requireTweet(tweetId);
-    const media = parseMedia(tweet.mediaJson).filter(
-      (item) => item.type === 'video' || item.type === 'gif',
-    );
-    return this.downloadMedia(tweet, media, 'video-thumbnails');
   }
 
   private requireTweet(tweetId: number): Tweet {
@@ -99,10 +88,6 @@ export class DefaultMediaService implements MediaService {
 
 export class StubMediaService implements MediaService {
   cachePhotos(_tweetId: number): Promise<string[]> {
-    throw new NotImplementedError('MediaService 未接线');
-  }
-
-  cacheVideoThumbnails(_tweetId: number): Promise<string[]> {
     throw new NotImplementedError('MediaService 未接线');
   }
 }

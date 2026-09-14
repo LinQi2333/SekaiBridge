@@ -22,6 +22,23 @@ refresh = on_command("刷新", priority=1)
 
 PENDING_LABELS = {"pending": "待翻译", "translated": "已翻译", "published": "已发布", "failed": "失败", "all": "全部"}
 
+# 工作流状态 → 群内展示中文
+WORKFLOW_LABELS = {
+    "DETECTED": "待处理",
+    "SCREENSHOT_READY": "截图完成",
+    "QQ_SENT": "已发群",
+    "WAITING_TRANSLATION": "待翻译",
+    "TRANSLATED": "已翻译，等待发布",
+    "READY_TO_PUBLISH": "待发布",
+    "PUBLISHING": "发布中",
+    "PUBLISHED": "已发布",
+    "PUBLISH_FAILED": "发布失败",
+}
+
+
+def workflow_label(status: str) -> str:
+    return WORKFLOW_LABELS.get(status, status)
+
 # 兼容中英文状态词（!列表 已翻译 与 !列表 translated 等价）
 STATUS_ALIASES = {
     "pending": "pending", "待翻译": "pending", "待处理": "pending",
@@ -85,7 +102,6 @@ async def handle_watch(bot: Bot, event: GroupMessageEvent, args: Message = Comma
             state = "开启" if a["enabled"] else "关闭"
             mark = "⭐ " if a["isDefault"] else "   "
             lines.append(f"{mark}@{a['screenName']}  {state}")
-        lines.append("\n用法：!监听 添加 @账号 | !监听 默认 @账号 | !监听 开启/关闭/删除 @账号")
         await bot.send(event, "\n".join(lines))
         return
     action, _, name = msg.partition(" ")
@@ -190,7 +206,7 @@ async def handle_list(bot: Bot, event: GroupMessageEvent, args: Message = Comman
     for t in result["items"]:
         deleted = "原推已删除 / " if t["sourceStatus"] == "SOURCE_DELETED" else ""
         lines.append(
-            f"#{t['seq']} @{t['authorScreenName']}   {deleted}{t['workflowStatus']}\n"
+            f"#{t['seq']} @{t['authorScreenName']}   {deleted}{workflow_label(t['workflowStatus'])}\n"
             f"{summarize(t.get('originalText'))}"
         )
     total_pages = max(1, (result["total"] + 9) // 10)
@@ -216,7 +232,7 @@ async def handle_show(bot: Bot, event: GroupMessageEvent, args: Message = Comman
         deleted = "⚠️ 原推已删除" if tweet["sourceStatus"] == "SOURCE_DELETED" else "正常"
         text = (
             f"@{tweet['authorScreenName']} #{tweet['seq']}\n"
-            f"来源状态：{deleted}\n工作状态：{tweet['workflowStatus']}\n"
+            f"来源状态：{deleted}\n工作状态：{workflow_label(tweet['workflowStatus'])}\n"
             f"原推：\n{tweet['tweetUrl']}"
         )
         if tweet.get("screenshotPath"):
@@ -259,7 +275,7 @@ async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = C
     await bot.send(
         event,
         f"@{tweet['authorScreenName']} #{seq} 翻译已保存。\n\n当前版本：v{tr['version']}\n"
-        f"状态：已翻译，等待发布。\n\n可继续：\n!发布 {seq} [话题别名]",
+        f"状态：已翻译，等待发布。",
     )
 
 
@@ -328,7 +344,6 @@ async def handle_topic(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         lines = ["当前话题库（发布时用别名指定）："]
         for t in topics:
             lines.append(f"{t['alias']}（#{t['biliTopicId']}）")
-        lines.append("\n用法：!话题 <B站话题号> <别名> | !话题 删除 <别名>")
         await bot.send(event, "\n".join(lines))
         return
     # 删除
