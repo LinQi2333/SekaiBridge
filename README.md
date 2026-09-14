@@ -2,6 +2,8 @@
 
 PJSK 推文搬运系统：监听 Twitter/X 账号 → 新推文截图并通知 QQ 群 → 群成员协作翻译 → 管理员发布到 Bilibili 动态（原图 + 话题）。
 
+本项目部分内容由deepseek-v4-flash/deepseek-v4.1-flash编写
+
 面向 **Linux + Docker** 部署。
 
 ---
@@ -144,7 +146,7 @@ start.sh         一键启动/状态/日志/停止
 
 本项目采用 **GNU Affero General Public License v3.0（AGPL-3.0）**，全文见 [`LICENSE`](LICENSE)。
 
-Copyright (C) 2026 SekaiBridge 项目作者
+Copyright (C) 2026 LinQi2333
 
 这意味着：
 
