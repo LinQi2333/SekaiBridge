@@ -106,6 +106,26 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 
 ---
 
+## 参考与致谢
+
+本项目在实现过程中参考或集成了以下第三方项目，感谢其作者与社区：
+
+| 项目 | 用途 | 许可协议 |
+| --- | --- | --- |
+| [TweetToaster](https://github.com/cn-matsuri/TweetToaster)（夏色祭工坊烤推机） | Twitter/X 推文数据获取与推文截图，以其官方 Docker 镜像独立部署 | GPL-3.0 |
+| [NoneBot2](https://github.com/nonebot/nonebot2) | QQ 机器人框架（本仓库 `nonebot-plugin/` 的运行环境） | MIT |
+| [nonebot-adapter-onebot](https://github.com/nonebot/adapter-onebot) | NoneBot2 的 OneBot v11 适配器 | MIT |
+| [NapCatQQ](https://github.com/NapNeko/NapCatQQ) | Linux QQ 无头运行与 OneBot v11 协议端，以 Docker 镜像方式使用 | Limited Redistribution License（非标准开源协议，详见其仓库 LICENSE） |
+| [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) | 哔哩哔哩接口文档参考（动态发布、wbi 签名、Cookie 刷新等实现依据） | CC-BY-NC 4.0 |
+
+说明：
+
+- 以上项目均以**独立进程 / 容器**方式集成，或仅作**接口文档参考**；本仓库不包含、不修改、不再分发其源代码
+- TweetToaster 采用 GPL-3.0：本项目仅通过 HTTP 调用其独立部署的服务，未修改或再分发其代码
+- 各项目名称与版权归其作者所有，协议文本以各自仓库为准
+
+---
+
 ## 目录
 
 ```text
