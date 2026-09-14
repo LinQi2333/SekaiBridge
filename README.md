@@ -137,3 +137,19 @@ docker-compose.yml 全栈编排（QQ 侧在 profile "full" 下）
 start.sh         一键启动/状态/日志/停止
 .env.example     环境变量模板
 ```
+
+---
+
+## 许可
+
+本项目采用 **GNU Affero General Public License v3.0（AGPL-3.0）**，全文见 [`LICENSE`](LICENSE)。
+
+Copyright (C) 2026 SekaiBridge 项目作者
+
+这意味着：
+
+- 你可以自由使用、修改、分发本项目
+- 分发或提供服务时须**保留版权声明与许可文本**，并**公开相应源代码**
+- **AGPL 第 13 条**：如果你修改后的版本通过网络对外提供服务，必须向使用者提供完整源代码
+- 第三方项目（TweetToaster、NoneBot2、NapCatQQ、bilibili-API-collect 等）仍遵循各自协议，见上文「参考与致谢」
+
