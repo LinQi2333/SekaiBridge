@@ -3,23 +3,22 @@
  * B 站扫码登录助手（生成 /app/data/bili-cookies.json：Cookie 串 + 刷新口令）
  *
  * 用法：
- *   npm run bili:login                     # 默认：生成二维码 PNG + 本地网页 + 终端二维码
- *   npm run bili:login -- --no-serve       # 只写 PNG 与终端二维码（无网页）
- *   npm run bili:login -- --host=0.0.0.0   # 让同局域网/公网的其他设备打开网页
+ *   npm run bili:login                     # 生成二维码 PNG + 终端二维码，等待扫码
+ *   npm run bili:login -- --no-terminal    # 只写 PNG（终端显示不正常时用）
  *   npm run bili:login -- --out=/opt/sekai-bridge/cache/bili-login-qr.png
  *
  * 服务器（Docker）用法：
- *   docker compose --profile tools run --rm --service-ports bili-login
- *   → 浏览器打开 http://<服务器IP>:18081/ 扫码；成功后凭据写入 /app/data/bili-cookies.json
+ *   docker compose --profile tools run --rm bili-login
+ *   → 终端扫码；终端二维码看不清就把 cache/bili-login-qr.png 下载下来扫
+ *   → 成功后凭据写入 /app/data/bili-cookies.json
  *
  * 扫码流程（B 站 Web 端官方接口）：
  *   申请二维码 → 手机 B 站 App 扫码并在手机上确认 → 拿到 Cookie 与 refresh_token(ac_time_value)
  *
- * 输出：凭据文件（应用唯一读取来源）+ 屏幕摘要 + 二维码 PNG。
+ * 输出：凭据文件（应用唯一读取来源）+ 二维码 PNG + 终端二维码。
  * 该脚本只在需要重新登录时一次性运行，不属于应用运行时逻辑。
  */
 import fs from 'node:fs';
-import http from 'node:http';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -91,9 +90,6 @@ export function parseArgs(argv) {
     out: process.env.CACHE_ROOT
       ? path.join(process.env.CACHE_ROOT, 'bili-login-qr.png')
       : 'bili-login-qr.png',
-    host: '127.0.0.1',
-    port: 18081,
-    serve: true,
     terminal: true,
     timeoutSec: 150,
     maxQr: 3,
@@ -103,12 +99,9 @@ export function parseArgs(argv) {
       : 'bili-login-cookies.json',
   };
   for (const arg of argv) {
-    if (arg === '--no-serve') options.serve = false;
-    else if (arg === '--no-terminal') options.terminal = false;
+    if (arg === '--no-terminal') options.terminal = false;
     else if (arg.startsWith('--out=')) options.out = arg.slice(6);
     else if (arg.startsWith('--cookie-file=')) options.cookieFile = arg.slice(14);
-    else if (arg.startsWith('--host=')) options.host = arg.slice(7);
-    else if (arg.startsWith('--port=')) options.port = Number.parseInt(arg.slice(7), 10);
     else if (arg.startsWith('--timeout=')) options.timeoutSec = Number.parseInt(arg.slice(10), 10);
     else if (arg.startsWith('--max-qr=')) options.maxQr = Number.parseInt(arg.slice(9), 10);
     else if (arg === '--help' || arg === '-h') options.help = true;
@@ -167,51 +160,6 @@ export async function pollOnce(qrcodeKey) {
   }
 }
 
-function renderPage() {
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>B 站扫码登录 · SekaiBridge</title>
-<style>
-  body { font-family: -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif; background:#f6f7f9;
-         margin:0; display:flex; min-height:100vh; align-items:center; justify-content:center; }
-  .card { background:#fff; padding:28px 32px; border-radius:14px; box-shadow:0 8px 30px rgba(0,0,0,.08); text-align:center; }
-  h1 { font-size:18px; margin:0 0 6px; }
-  p { color:#666; font-size:13px; margin:6px 0; }
-  img { width:300px; height:300px; image-rendering:pixelated; margin:8px 0; }
-  #status { font-size:15px; font-weight:600; color:#0a7d32; min-height:22px; }
-  code { font-size:11px; color:#999; word-break:break-all; display:block; margin-top:10px; }
-</style>
-</head>
-<body>
-  <div class="card">
-    <h1>用手机 B 站 App 扫码登录</h1>
-    <p>登录的是发布账号（如 Project_SEKAI资讯站），确认后本页会提示成功</p>
-    <img src="/qr.png" alt="登录二维码">
-    <div id="status">等待扫码…</div>
-    <p>二维码 3 分钟内有效；成功后本容器会自动退出（结果见终端输出）</p>
-    <code id="url"></code>
-  </div>
-<script>
-  async function tick() {
-    try {
-      const r = await fetch('/status', { cache: 'no-store' });
-      const s = await r.json();
-      document.getElementById('status').textContent = s.message;
-      document.getElementById('status').style.color = s.state === 'ok' ? '#0a7d32' : (s.state === 'expired' ? '#c0392b' : '#b26a00');
-      if (s.qr) document.getElementById('url').textContent = s.qr;
-      if (s.state === 'ok') return;
-    } catch (e) {}
-    setTimeout(tick, 2000);
-  }
-  tick();
-</script>
-</body>
-</html>`;
-}
-
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
@@ -220,9 +168,6 @@ async function main() {
         '用法: npm run bili:login -- [选项]',
         '  --out=<path>       二维码 PNG 输出路径（默认 CACHE_ROOT/bili-login-qr.png 或 ./bili-login-qr.png）',
         '  --cookie-file=<path>  凭据文件输出路径（容器内默认 /app/data/bili-cookies.json）',
-        '  --host=127.0.0.1   网页监听地址（默认仅本机；0.0.0.0 可让其他设备访问）',
-        '  --port=18081       网页端口',
-        '  --no-serve         不启动本地网页',
         '  --no-terminal      不在终端打印二维码',
         '  --timeout=<秒>     单次等待扫码的秒数（默认 150）',
         '  --max-qr=<n>       二维码失效后最多重新生成几次（默认 3）',
@@ -239,94 +184,51 @@ async function main() {
     process.exit(1);
   }
 
-  const state = { state: 'waiting', message: '等待扫码…', qr: '' };
-  let png = Buffer.alloc(0);
-  let server = null;
+  for (let attempt = 1; attempt <= options.maxQr; attempt += 1) {
+    const { url, qrcodeKey } = await generateQr();
+    fs.mkdirSync(path.dirname(path.resolve(options.out)), { recursive: true });
+    await QRCode.toFile(options.out, url, { width: 360, margin: 1 });
 
-  if (options.serve) {
-    server = http.createServer((req, res) => {
-      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
-      if (url.pathname === '/qr.png') {
-        res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store' });
-        res.end(png);
+    console.log(`\n[bili-login] 二维码已生成（第 ${attempt}/${options.maxQr} 个）`);
+    console.log(`[bili-login] 二维码图片: ${path.resolve(options.out)}`);
+    if (options.terminal) {
+      console.log(await QRCode.toString(url, { type: 'terminal', small: true }));
+    }
+    console.log('[bili-login] 终端里显示不正常时，把上面这张 PNG 下载到本地（scp/sftp）再扫。');
+    console.log('[bili-login] 也可以在手机浏览器直接打开这条链接：');
+    console.log(`[bili-login] ${url}\n`);
+
+    const deadline = Date.now() + options.timeoutSec * 1000;
+    let expired = false;
+    let lastMessage = '';
+    while (Date.now() < deadline) {
+      const result = await pollOnce(qrcodeKey);
+      if (result.message !== lastMessage) {
+        lastMessage = result.message;
+        if (result.state !== 'waiting') {
+          console.log(`[bili-login] ${result.message}`);
+        }
+      }
+      if (result.state === 'ok') {
+        await onSuccess(result, options);
         return;
       }
-      if (url.pathname === '/status') {
-        res.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify(state));
-        return;
+      if (result.state === 'expired') {
+        expired = true;
+        console.log('[bili-login] 二维码已失效，重新生成…');
+        break;
       }
-      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-      res.end(renderPage());
-    });
-    await new Promise((resolve) => server.listen(options.port, options.host, resolve));
-    const shown = options.host === '0.0.0.0' ? '<服务器IP>' : options.host;
-    console.log(`[bili-login] 网页二维码: http://${shown}:${options.port}/`);
-  }
-
-  const close = () => {
-    if (server) {
-      server.close();
-      server = null;
+      if (result.state === 'error') {
+        throw new Error(result.message);
+      }
+      await sleep(2000);
     }
-  };
-
-  try {
-    for (let attempt = 1; attempt <= options.maxQr; attempt += 1) {
-      const { url, qrcodeKey } = await generateQr();
-      png = await QRCode.toBuffer(url, { width: 360, margin: 1 });
-      fs.mkdirSync(path.dirname(path.resolve(options.out)), { recursive: true });
-      await QRCode.toFile(options.out, url, { width: 360, margin: 1 });
-      state.state = 'waiting';
-      state.message = `等待扫码…（第 ${attempt}/${options.maxQr} 个二维码）`;
-      state.qr = url;
-
-      console.log(`\n[bili-login] 二维码已生成（第 ${attempt}/${options.maxQr} 个）`);
-      console.log(`[bili-login] PNG: ${path.resolve(options.out)}`);
-      if (options.terminal) {
-        console.log(await QRCode.toString(url, { type: 'terminal', small: true }));
-      }
-      console.log('[bili-login] 若二维码显示不正常，可把上面二维码对应的链接粘到手机浏览器打开：');
-      console.log(`[bili-login] ${url}\n`);
-
-      const deadline = Date.now() + options.timeoutSec * 1000;
-      let expired = false;
-      while (Date.now() < deadline) {
-        const result = await pollOnce(qrcodeKey);
-        if (result.state !== state.state || result.message !== state.message) {
-          state.state = result.state;
-          state.message = result.message;
-          if (result.state !== 'waiting') {
-            console.log(`[bili-login] ${result.message}`);
-          }
-        }
-        if (result.state === 'ok') {
-          state.message = '登录成功，可以关闭本页面';
-          await onSuccess(result, options);
-          return;
-        }
-        if (result.state === 'expired') {
-          expired = true;
-          state.state = 'expired';
-          state.message = '二维码已失效，正在重新生成…';
-          console.log('[bili-login] 二维码已失效，重新生成…');
-          break;
-        }
-        if (result.state === 'error') {
-          throw new Error(result.message);
-        }
-        await sleep(2000);
-      }
-      if (!expired) {
-        console.log('[bili-login] 等待超时，重新生成二维码…');
-      }
+    if (!expired) {
+      console.log('[bili-login] 等待超时，重新生成二维码…');
     }
-    console.error('[bili-login] 多次二维码都未完成扫码，请重新运行。');
-    process.exitCode = 1;
-  } finally {
-    await sleep(1500);
-    close();
   }
+  console.error('[bili-login] 多次二维码都未完成扫码，请重新运行。');
+  process.exitCode = 1;
 }
 
 /** 登录成功：核对账号 → 打印/落盘 Cookie 与 refresh_token。 */

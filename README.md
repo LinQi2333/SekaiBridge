@@ -66,7 +66,7 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
 cd /opt/sekai-bridge
 
 docker compose stop app
-docker compose --profile tools run --rm --build --service-ports bili-login
+docker compose --profile tools run --rm --build bili-login
 
 docker compose up -d app
 docker compose logs -f app | grep -i bilibili

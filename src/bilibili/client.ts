@@ -292,7 +292,7 @@ export class BilibiliClient {
   async #fetchRaw(url: string, init: RequestInit): Promise<Response> {
     if (!this.hasCookie()) {
       throw new BilibiliAuthError(
-        '未配置 Bilibili 凭据：请先运行扫码登录工具（docker compose stop app && docker compose --profile tools run --rm --service-ports bili-login && docker compose up -d app）',
+        '未配置 Bilibili 凭据：请先运行扫码登录工具（docker compose stop app && docker compose --profile tools run --rm bili-login && docker compose up -d app）',
       );
     }
     const controller = new AbortController();

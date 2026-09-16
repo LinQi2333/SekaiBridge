@@ -42,7 +42,7 @@ export interface AppConfig {
 
   /**
    * Bilibili 凭据文件（**固定路径，不可配置**）：数据库同目录下的 `bili-cookies.json`。
-   * 凭据唯一来源——由扫码登录工具写入（`docker compose --profile tools run --rm --service-ports bili-login`），
+   * 凭据唯一来源——由扫码登录工具写入（`docker compose --profile tools run --rm bili-login`），
    * 之后由 bili_ticket / SESSDATA 自动续期回写。不再支持用环境变量手工填 Cookie。
    */
   biliCookieFile: string;
