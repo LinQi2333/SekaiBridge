@@ -1,6 +1,6 @@
 # SekaiBridge（世界桥）
 
-PJSK 推文搬运系统：监听 Twitter/X 账号 → 新推文截图并通知 QQ 群 → 群成员协作翻译 → 管理员发布到 Bilibili 动态（原图 + 话题）。
+PJSK 推文搬运系统：监听 Twitter/X 账号 → 新推文截图并通知 QQ 群 → 群成员协作翻译 → 发布到 Bilibili 动态。
 
 本项目部分内容由deepseek-v4-flash/deepseek-v4.1-flash编写
 
@@ -36,11 +36,7 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
 ./start.sh status
 ```
 
-启动后登录机器人 QQ：浏览器打开 `http://<服务器IP>:6099/webui`（token 见 `docker compose logs napcat`）扫码登录。
-
-验证：`curl http://127.0.0.1:18080/api/health` 返回 `{"ok":true,...}`；群里发 `/列表` 有响应即全链路通了。
-
-> 命令前缀默认 `/`，可在 NoneBot2 侧 `COMMAND_START` 调整（如改为 `!`）。
+> 命令前缀默认 `/`，可在 NoneBot2 侧 `COMMAND_START` 调整。
 
 ---
 
@@ -59,44 +55,26 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
 
 其余变量（端口、轮询等）可留默认，详见 `.env.example`。
 
-> **Bilibili 凭据不在 `.env` 配置**：唯一来源是数据卷里的 `/app/data/bili-cookies.json`，
-> 由扫码登录工具写入、由自动续期回写，路径固定不可改（见下）。
+> Bilibili 凭据由扫码登录工具写入、由自动续期回写，路径固定不可改。
 
-### Bilibili 登录（扫码，唯一方式）
+### Bilibili 登录（扫码）
 
-凭据只存一个地方：数据卷里的 **`/app/data/bili-cookies.json`**（路径固定，不可配置）。
-由扫码登录工具写入，之后由 `bili_ticket` / `SESSDATA` 自动续期回写。**不再支持手工填 Cookie 环境变量。**
+凭据在 **`/app/data/bili-cookies.json`**。
+由扫码登录工具写入，之后由 `bili_ticket` / `SESSDATA` 自动续期回写。
 
 ```bash
 cd /opt/sekai-bridge
-git pull
-docker compose stop app                                   # 先停 app，避免它把旧凭据写回文件
+
+docker compose stop app
 docker compose --profile tools run --rm --build --service-ports bili-login
-#   → 浏览器打开 http://<服务器IP>:18081/ ，用手机 B 站 App 扫码并在手机上确认
+
 docker compose up -d app
 docker compose logs -f app | grep -i bilibili
 ```
 
-- 二维码三种给法：**网页**（NapCat 式，失效会自动刷新）、**终端里直接打印**（网页打不开时用）、
-  以及 PNG `cache/bili-login-qr.png`；网页打不开通常是云服务器安全组没放行 18081（临时放行即可，
-  容器退出后端口自动释放）
-- 扫码成功后终端会显示账号昵称，并把凭据**直接写进 app 的数据卷**，所以不需要改任何配置
-- 不想要网页时（只打印终端二维码与 PNG）：把命令末尾换成完整脚本调用
-  `docker compose --profile tools run --rm --service-ports bili-login node scripts/bili-login.mjs --no-serve`
-- 没有 Docker 环境时可在本地电脑跑同一脚本：`npm install && npm run bili:login`
-  （终端二维码 + 本地网页 `http://127.0.0.1:18081` + `bili-login-qr.png`）。本机运行会把凭据写到
-  当前目录，再拷进容器即可：`docker compose cp bili-login-cookies.json app:/app/data/bili-cookies.json`
+- 若终端内打印的二维码无法扫码登录请使用PNG `cache/bili-login-qr.png`；
 
-主程序每 6 小时做一次会话体检与自动续期（B 站 Web 端同款机制）：
-
-- **`bili_ticket`**：始终自动续期（有效期 3 天），新值写回凭据文件
-- **`SESSDATA`**：B 站提示临近过期时自动续期（`cookie/info` → CorrespondPath →
-  `refresh_csrf` → `cookie/refresh` → `confirm/refresh`），新 Cookie 与**轮换后的刷新口令**
-  一起写回凭据文件，因此只需扫码一次
-- 续期成功日志：`[bilibili] SESSDATA 已自动续期，有效期至 ...`
-- 续期失败（如刷新口令被作废 `code=86095`、被风控）会打印原因，并把已失效的刷新口令从文件里清掉；
-  此时**重跑一次上面的扫码登录**即可（旧 SESSDATA 在真正过期前仍能正常发布）
-- `checkSession` 发现凭据文件不存在/失效时，日志会直接给出这条扫码登录命令
+- 主程序每 6 小时做一次会话体检与自动续期：
 
 > 续期不等于永久免维护：账号被风控强制下线、改密码、或长期未登录时仍需重新登录一次。
 
@@ -137,16 +115,13 @@ docker compose logs -f app | grep -i bilibili
 ```
 
 - **更新**：`git pull && ./start.sh`
-- **数据**：数据库在 volume `app-data`（`/app/data/app.db`）；缓存在 `cache/`（与宿主机同路径挂载，NapCat 直接按绝对路径读取）
+- **数据**：数据库在 `/app/data/app.db`；缓存在 `cache/`，与宿主机同路径挂载
 - **缓存目录**：
   - `cache/screenshots/<推文ID>.png`：推文截图，**永久保留**（数据库会引用，请勿手动删除）
-  - `cache/media/<推文ID>/`：推文原图与视频，`photo<n>.<ext>` / `video<n>.<ext>`；新推文入库即自动下载，
-    发布与 `/媒体` **本地优先**（已下载就直接读文件，缺失才下载补齐），不会重复下载
+  - `cache/media/<推文ID>/`：推文原图与视频，`photo<n>.<ext>` / `video<n>.<ext>`；新推文入库即自动下载
   - 媒体按 `MEDIA_CACHE_TTL_DAYS`（默认 7 天）由后台每 6 小时清理一次；如需彻底清空可整个删除 `cache/media/`（下次自动重新下载）
-  - 旧版本遗留的 `cache/twitter-photos/`、`cache/video-thumbnails/`、`cache/exports/` 目录已废弃，可直接删除
 - **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → 登录失效 → 重新扫码登录（见「Bilibili 登录」）→
   `docker compose up -d app` → `/重试`
-- **Bilibili 必须直连**（勿为其配置代理，会触发 CSRF/风控）；Twitter 媒体如需代理配 `HTTPS_PROXY`
 
 ---
 
@@ -195,6 +170,5 @@ Copyright (C) 2026 LinQi2333
 
 - 你可以自由使用、修改、分发本项目
 - 分发或提供服务时须**保留版权声明与许可文本**，并**公开相应源代码**
-- **AGPL 第 13 条**：如果你修改后的版本通过网络对外提供服务，必须向使用者提供完整源代码
 - 第三方项目（TweetToaster、NoneBot2、NapCatQQ、bilibili-API-collect 等）仍遵循各自协议，见上文「参考与致谢」
 
