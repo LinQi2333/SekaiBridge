@@ -51,10 +51,10 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 | `QQ_GROUP_IDS` | 允许使用的 QQ 群号，逗号分隔（必填） |
 | `QQ_ADMIN_IDS` | 管理员 QQ 号，逗号分隔（必填；群主/群管理员自动拥有管理权限） |
 | `API_TOKEN` | 内部 API 密钥，`openssl rand -hex 32` 生成（必填） |
-| `BILI_COOKIE_STRING` | Bilibili 发布账号完整 Cookie 串（推荐；见下） |
-| `BILI_REFRESH_TOKEN` | 持久化刷新口令（`ac_time_value`）：配置后 `SESSDATA` 自动续期（见下） |
-| `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` | 未提供完整串时的最小三件套（可选） |
-| `BILI_COOKIE_FILE` | Cookie 持久化文件路径（默认数据库同目录，自动续期写回） |
+| `BILI_COOKIE_STRING` | 手工兜底：完整 Cookie 串（**推荐留空**，凭据由扫码工具写进 cookie 文件） |
+| `BILI_REFRESH_TOKEN` | 手工兜底：持久化刷新口令 `ac_time_value`（**推荐留空**） |
+| `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` | 旧版三件套：**已不推荐，建议留空**（见「凭据优先级」） |
+| `BILI_COOKIE_FILE` | Cookie 持久化文件路径（默认 `/app/data/bili-cookies.json`） |
 | `TWITTER_POLL_INTERVAL` | 监听轮询间隔（秒，默认 60） |
 | `MEDIA_CACHE_TTL_DAYS` | 媒体缓存保留天数（默认 7；截图不受影响） |
 | `MEDIA_EXPORT_MAX_MB` | 单个媒体文件下载上限（MB，默认 300） |
@@ -65,19 +65,10 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 
 ### Bilibili Cookie
 
-**方式一：从浏览器复制**（需要能开浏览器）
+凭据只存一个地方：**cookie 文件**（容器内 `/app/data/bili-cookies.json`，由扫码工具写入、由自动续期回写）。
+`.env` 里的 Cookie 变量只作兜底，**推荐全部留空**（见下方「凭据优先级」）。
 
-1. 浏览器（建议用一个**专用配置文件**，不要用无痕窗口——无痕关闭后 localStorage 会被清空，
-   `ac_time_value` 就取不回来了）登录 `https://www.bilibili.com`
-2. `F12` → 存储/Application → Cookies，把登录后产生的 cookie 逐条复制为
-   `SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; buvid3=xxx; ...` 填入 `BILI_COOKIE_STRING`
-   （也可以从 Network → 任一 `www.bilibili.com` 请求的 Request Headers 里整行复制 `cookie:`，
-   注意 `document.cookie` 取不到 HttpOnly 的 `SESSDATA`）
-3. 同一面板 → Local Storage → `https://www.bilibili.com` → 复制 `ac_time_value` 填入
-   `BILI_REFRESH_TOKEN`（B 站官方的持久化刷新口令，是 `SESSDATA` 自动续期的前提）
-4. 验证：`docker compose up -d app` 后看启动日志；或调用 nav 查询确认 `isLogin: true`
-
-**方式二：扫码登录（推荐，服务器上直接完成，无需浏览器插件/DevTools）**
+**方式一：扫码登录（推荐，服务器上直接完成）**
 
 ```bash
 cd /opt/sekai-bridge
@@ -89,33 +80,30 @@ docker compose up -d app
 docker compose logs -f app | grep -i bilibili
 ```
 
-- 二维码三种给法：**网页**（NapCat 式，失败会自动刷新二维码）、**终端里直接打印**（网页打不开时用）、
+- 二维码三种给法：**网页**（NapCat 式，失效会自动刷新）、**终端里直接打印**（网页打不开时用）、
   以及 PNG `cache/bili-login-qr.png`；网页打不开通常是云服务器安全组没放行 18081（临时放行即可，
   容器退出后端口自动释放）
-- 扫码成功后工具会核对账号昵称，并把新 Cookie **直接写进 app 的数据卷**
-  （`/app/data/bili-cookies.json`），所以**不用改 `.env`**；同时也会打印两行 `.env` 片段
-  （建议顺手更新 `.env` 作为兜底：app 读文件优先，文件丢了才会回退 `.env`）
+- 扫码成功后工具会核对账号昵称，并把新 Cookie **直接写进 app 的数据卷**，所以**不用改 `.env`**
 - 不想要网页时（只打印终端二维码与 PNG）：把命令末尾换成完整脚本调用
   `docker compose --profile tools run --rm --service-ports bili-login node scripts/bili-login.mjs --no-serve`
+- 没有 Docker 环境时可在本地电脑跑同一脚本：`npm install && npm run bili:login`
+  （终端二维码 + 本地网页 `http://127.0.0.1:18081` + `bili-login-qr.png`；可用参数 `--no-serve`、
+  `--host=0.0.0.0`、`--out=<png路径>`、`--cookie-file=<app 的 cookie 文件路径>`）
 
-**方式二（本机版）**：没有 Docker 环境时可在本地电脑跑同一脚本，再把结果填进服务器 `.env`：
+**方式二：从浏览器复制（手工兜底，不推荐）**
 
-```bash
-npm install            # 首次：安装二维码依赖 qrcode
-npm run bili:login     # 终端二维码 + 本地网页 http://127.0.0.1:18081 + bili-login-qr.png
-```
-
-成功后脚本输出 `BILI_COOKIE_STRING` 与 `BILI_REFRESH_TOKEN`，并写入 `bili-login.env`
-（**含凭据，贴完请删除**）。常用参数：`--no-serve`、`--host=0.0.0.0`、`--out=<png路径>`、
-`--cookie-file=<路径>`（直接写 app 的 cookie 文件）。
-
-**改用 .env 方式时**（方式一，或本机版脚本）：
+1. 浏览器（用**专用配置文件**，不要无痕窗口——无痕关闭后 localStorage 会被清空，
+   `ac_time_value` 就取不回来了）登录 `https://www.bilibili.com`
+2. `F12` → Network → 任一 `www.bilibili.com` 请求 → Request Headers → 整行复制 `cookie:`，
+   填入 `BILI_COOKIE_STRING`（注意 `document.cookie` 取不到 HttpOnly 的 `SESSDATA`）
+3. `F12` → Application → Local Storage → `https://www.bilibili.com` → 复制 `ac_time_value` 填入
+   `BILI_REFRESH_TOKEN`（`SESSDATA` 自动续期的前提）
+4. 改完 `.env` 后**必须删掉 cookie 文件**，否则文件优先、改动不生效：
 
 ```bash
 cd /opt/sekai-bridge
-vim .env        # 覆盖 BILI_COOKIE_STRING，填好 BILI_REFRESH_TOKEN
-docker compose up -d --build app
-docker compose exec app rm -f /app/data/bili-cookies.json   # 清掉旧 cookie 文件，避免覆盖 .env
+vim .env        # 填 BILI_COOKIE_STRING / BILI_REFRESH_TOKEN
+docker compose exec app rm -f /app/data/bili-cookies.json
 docker compose restart app
 docker compose logs -f app | grep -i bilibili
 ```
@@ -131,9 +119,10 @@ docker compose logs -f app | grep -i bilibili
 - 文件存在且有效时，`.env` 里的 Cookie 一律被忽略；用 `BILI_COOKIE_STRING` 时请注意：
   **改完 `.env` 必须同时删掉 cookie 文件**（`docker compose exec app rm -f /app/data/bili-cookies.json`），否则新值不生效
 - **推荐做法**：只用 cookie 文件（扫码工具维护），把 `.env` 里的
-  `BILI_COOKIE_STRING` / `BILI_REFRESH_TOKEN` / `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` 全部留空。
-  尤其 `BILI_JCT` 建议务必留空：`csrf` 参数会优先取 Cookie 串里的 `bili_jct`（与 Cookie 头同源），
-  如果 `.env` 里留着一份旧的 `bili_jct`，自动续期轮换后两套凭据会不一致，容易出现 `-111 csrf 校验失败`
+  `BILI_COOKIE_STRING` / `BILI_REFRESH_TOKEN` / `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` 全部留空
+  （`.env.example` 里这些项默认也是空的）。
+  尤其 `BILI_JCT` 务必留空：`csrf` 参数优先取 Cookie 串里的 `bili_jct`（与 Cookie 头同源），
+  如果 `.env` 里留着一份旧的 `bili_jct`，自动续期轮换后两套凭据会不一致，容易触发 `-111 csrf 校验失败`
 - cookie 文件丢失时（换机器/清卷）app 会明确报"未配置 Cookie"，重跑一次扫码工具即可
 
 主程序每 6 小时做一次会话体检与自动续期（B 站 Web 端同款机制）：
