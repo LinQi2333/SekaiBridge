@@ -5,30 +5,13 @@ import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from './err
 import type { UploadedImage } from './image-upload.js';
 import { extractKeyFromImageUrl, signWbi, type WbiSignResult } from './wbi.js';
 
-/** Bilibili 登录 Cookie（规格 §40：只放 .env，禁止进入 Git/日志）。 */
-export interface BilibiliCookie {
-  sessdata: string;
-  jct: string;
-  dedeuserid: string;
-}
-
+/**
+ * Bilibili 客户端配置。
+ * 凭据**唯一来源**是 cookie 文件（由扫码登录工具写入），不再支持环境变量手工填 Cookie。
+ */
 export interface BilibiliClientOptions {
-  cookie: BilibiliCookie;
-  /**
-   * 完整 Cookie 串（可选）：浏览器 DevTools 复制的全部 Cookie（含 buvid3/buvid4/b_lsid 等指纹）。
-   * 提供后优先使用；否则回退到 cookie 三件套。
-   */
-  cookieString?: string;
-  /**
-   * Cookie 持久化文件（可选）：自动续期（bili_ticket 等）得到的新值写回该文件，
-   * 启动时优先读取文件（文件优先于 env，保证续期结果跨重启保留）。
-   */
-  cookieFile?: string;
-  /**
-   * 持久化刷新口令（浏览器 localStorage 的 `ac_time_value`）。
-   * 提供后即可在 SESSDATA 临近过期时自动续期（B 站 Web 端 Cookie 刷新机制）。
-   */
-  refreshToken?: string;
+  /** 凭据文件路径（固定为数据目录下的 bili-cookies.json）。 */
+  cookieFile: string;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   /** wbi key 缓存有效期（毫秒），默认 1 小时。 */
@@ -143,44 +126,31 @@ export function cookieValue(cookieString: string, name: string): string | null {
  * 测试通过注入 fetchImpl 完全隔离真实网络。
  */
 export class BilibiliClient {
-  private readonly cookie: BilibiliCookie;
   private cookieString: string;
-  private readonly cookieFile: string | null;
+  private readonly cookieFile: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly wbiCacheTtlMs: number;
   private wbiCache: { keys: WbiKeys; expiresAt: number } | null = null;
-  /** 当前生效的持久化刷新口令（ac_time_value）；刷新失败后回退到 env 初值。 */
+  /** 当前生效的持久化刷新口令（ac_time_value），来自凭据文件。 */
   private refreshToken: string | null;
-  /** env / 初始 Cookie 串里的刷新口令（兜底用）。 */
-  private readonly envRefreshToken: string | null;
 
   constructor(options: BilibiliClientOptions) {
-    this.cookie = options.cookie;
-    // 空串等同于"未配置"：否则会静默跳过 cookie 文件的读写
-    this.cookieFile = options.cookieFile?.trim() || null;
-    // 优先读取持久化文件（续期结果跨重启保留），否则用 env 初值
+    this.cookieFile = options.cookieFile;
+    // 凭据全部来自文件（扫码登录工具写入，续期时回写）
     const fromFile = this.#loadCookieFromFile();
-    this.cookieString = fromFile?.cookieString ?? options.cookieString ?? '';
-    this.envRefreshToken =
-      options.refreshToken?.trim() ||
+    this.cookieString = fromFile?.cookieString ?? '';
+    this.refreshToken =
+      fromFile?.refreshToken ??
       (this.cookieString ? cookieValue(this.cookieString, 'ac_time_value') : null);
-    // 文件里的刷新口令是轮换后的最新值，优先于 env（否则每次重启都会退回旧口令）
-    this.refreshToken = fromFile?.refreshToken ?? this.envRefreshToken;
-    if (this.cookieFile && !fromFile && this.cookieString.trim()) {
-      this.#saveCookieFile();
-    }
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.wbiCacheTtlMs = options.wbiCacheTtlMs ?? 60 * 60 * 1000;
   }
 
-  /** 是否已配置完整 Cookie（未配置时所有接口都会报登录失效）。 */
+  /** 是否已登录（凭据文件存在且有内容；未配置时所有接口都会报登录失效）。 */
   hasCookie(): boolean {
-    if (this.cookieString.trim()) {
-      return true;
-    }
-    return Boolean(this.cookie.sessdata && this.cookie.jct && this.cookie.dedeuserid);
+    return this.cookieString.trim().length > 0;
   }
 
   /**
@@ -321,7 +291,9 @@ export class BilibiliClient {
   /** 底层请求：统一带 Cookie 与浏览器风格头，网络异常转 BilibiliNetworkError。 */
   async #fetchRaw(url: string, init: RequestInit): Promise<Response> {
     if (!this.hasCookie()) {
-      throw new BilibiliAuthError('未配置 Bilibili Cookie（BILI_SESSDATA/BILI_JCT/BILI_DEDEUSERID）');
+      throw new BilibiliAuthError(
+        '未配置 Bilibili 凭据：请先运行扫码登录工具（docker compose stop app && docker compose --profile tools run --rm --service-ports bili-login && docker compose up -d app）',
+      );
     }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
@@ -388,29 +360,13 @@ export class BilibiliClient {
     return { ok: true, payload, response };
   }
 
-  /**
-   * csrf token：**优先 Cookie 串里的 `bili_jct`**（与 Cookie 头同源），
-   * 只在 Cookie 串缺失时才回退到 env 三件套。
-   * 顺序不能反：SESSDATA 自动续期会轮换 `bili_jct`，若 csrf 取自另一份凭据，
-   * 就会出现「Cookie 头是新值、csrf 是旧值」→ B 站 -111 csrf 校验失败。
-   */
+  /** csrf token：取凭据串里的 `bili_jct`（与 Cookie 头同源）。 */
   #jct(): string {
-    const fromCookieString = this.cookieString ? cookieValue(this.cookieString, 'bili_jct') : null;
-    if (fromCookieString) {
-      return fromCookieString;
-    }
-    return this.cookie.jct ?? '';
+    return (this.cookieString ? cookieValue(this.cookieString, 'bili_jct') : null) ?? '';
   }
 
   #cookieHeader(): string {
-    if (this.cookieString.trim()) {
-      return this.cookieString.trim();
-    }
-    return [
-      `SESSDATA=${this.cookie.sessdata}`,
-      `bili_jct=${this.cookie.jct}`,
-      `DedeUserID=${this.cookie.dedeuserid}`,
-    ].join('; ');
+    return this.cookieString.trim();
   }
 
   // ---------- 会话体检 / bili_ticket 自动续期 ----------
@@ -550,8 +506,8 @@ export class BilibiliClient {
     });
     if (!refreshed.ok) {
       if (refreshed.code === REFRESH_TOKEN_MISMATCH_CODE) {
-        // 口令作废：清空已存口令，下次回退到 env 里的新口令
-        this.refreshToken = this.envRefreshToken;
+        // 口令已作废：清掉它，避免每轮都用废口令重试；之后需要重新扫码登录
+        this.refreshToken = null;
         this.#saveCookieFile();
       }
       return {
@@ -642,7 +598,6 @@ export class BilibiliClient {
   }
 
   #loadCookieFromFile(): { cookieString: string; refreshToken: string | null } | null {
-    if (!this.cookieFile) return null;
     try {
       if (!fs.existsSync(this.cookieFile)) return null;
       const parsed = JSON.parse(fs.readFileSync(this.cookieFile, 'utf8')) as {
@@ -660,7 +615,6 @@ export class BilibiliClient {
   }
 
   #saveCookieFile(): void {
-    if (!this.cookieFile) return;
     try {
       fs.mkdirSync(path.dirname(this.cookieFile), { recursive: true });
       fs.writeFileSync(

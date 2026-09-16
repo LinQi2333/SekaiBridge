@@ -40,23 +40,10 @@ export interface AppConfig {
   /** 管理员 QQ 号。 */
   qqAdminIds: string[];
 
-  /** Bilibili 登录 Cookie（secret）。 */
-  biliSessdata: string;
-  biliJct: string;
-  biliDedeuserid: string;
   /**
-   * 完整 Cookie 串（可选）：浏览器登录后复制的全部 Cookie（含 buvid3/buvid4/b_lsid 等指纹）。
-   * 配置后优先于上面三项使用，请求形态更接近真实浏览器，降低风控概率。
-   */
-  biliCookieString: string;
-  /**
-   * 持久化刷新口令（浏览器 localStorage 的 `ac_time_value`）。
-   * 配置后 SESSDATA 临近过期时自动续期；留空则只能人工更新 Cookie。
-   */
-  biliRefreshToken: string;
-  /**
-   * Cookie 持久化文件（自动续期写入用）。B 站返回的新 cookie（如 bili_ticket）
-   * 会写回该文件并在下次启动时优先读取；默认放在数据库同目录。
+   * Bilibili 凭据文件（**固定路径，不可配置**）：数据库同目录下的 `bili-cookies.json`。
+   * 凭据唯一来源——由扫码登录工具写入（`docker compose --profile tools run --rm --service-ports bili-login`），
+   * 之后由 bili_ticket / SESSDATA 自动续期回写。不再支持用环境变量手工填 Cookie。
    */
   biliCookieFile: string;
 
@@ -124,9 +111,11 @@ export function loadConfig(env: Env = process.env): AppConfig {
     throw new Error(`config: PUBLISH_MODE 仅支持 manual，实际值: ${JSON.stringify(publishMode)}`);
   }
 
+  const databasePath = path.resolve(env.DATABASE_PATH?.trim() || './data/app.db');
+
   return {
     nodeEnv,
-    databasePath: path.resolve(env.DATABASE_PATH ?? './data/app.db'),
+    databasePath,
     cacheRoot: path.resolve(env.CACHE_ROOT ?? './cache'),
     tweettoasterUrl: env.TWEETTOASTER_URL ?? 'http://tweettoaster:8082',
     twitterPollInterval: parseIntStrict(env.TWITTER_POLL_INTERVAL, 60, 'TWITTER_POLL_INTERVAL'),
@@ -136,19 +125,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
     onebotAccessToken: env.ONEBOT_ACCESS_TOKEN ?? '',
     qqGroupIds: parseCsv(env.QQ_GROUP_IDS),
     qqAdminIds: parseCsv(env.QQ_ADMIN_IDS),
-    biliSessdata: env.BILI_SESSDATA ?? '',
-    biliJct: env.BILI_JCT ?? '',
-    biliDedeuserid: env.BILI_DEDEUSERID ?? '',
-    biliCookieString: env.BILI_COOKIE_STRING ?? '',
-    biliRefreshToken: env.BILI_REFRESH_TOKEN ?? '',
-    // 注意用 ||（而不是 ??）：compose 会把未设置的变量传成空串，
-    // 空串必须回退到默认路径，否则 cookie 文件读写会被静默禁用
-    biliCookieFile:
-      env.BILI_COOKIE_FILE?.trim() ||
-      path.join(
-        path.dirname(path.resolve(env.DATABASE_PATH?.trim() || './data/app.db')),
-        'bili-cookies.json',
-      ),
+    // 固定路径（不接受环境变量覆盖）：数据库同目录，容器内即 /app/data/bili-cookies.json
+    biliCookieFile: path.join(path.dirname(databasePath), 'bili-cookies.json'),
     publishMode,
     fxTwitterBaseUrl: (env.FX_TWITTER_BASE_URL ?? 'https://api.fxtwitter.com/2').replace(/\/+$/, ''),
     mediaExportMaxMb: parseIntStrict(env.MEDIA_EXPORT_MAX_MB, 300, 'MEDIA_EXPORT_MAX_MB'),

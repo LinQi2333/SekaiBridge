@@ -31,7 +31,7 @@ QQ 群 ◄──► nonebot2（QQ 命令）◄── napcat（Linux QQ / OneBot�
 git clone https://github.com/LinQi2333/SekaiBridge.git /opt/sekai-bridge
 cd /opt/sekai-bridge
 cp .env.example .env
-vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE_STRING
+vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN
 ./start.sh      # 构建并启动全部 4 个服务
 ./start.sh status
 ```
@@ -51,10 +51,6 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 | `QQ_GROUP_IDS` | 允许使用的 QQ 群号，逗号分隔（必填） |
 | `QQ_ADMIN_IDS` | 管理员 QQ 号，逗号分隔（必填；群主/群管理员自动拥有管理权限） |
 | `API_TOKEN` | 内部 API 密钥，`openssl rand -hex 32` 生成（必填） |
-| `BILI_COOKIE_STRING` | 手工兜底：完整 Cookie 串（**推荐留空**，凭据由扫码工具写进 cookie 文件） |
-| `BILI_REFRESH_TOKEN` | 手工兜底：持久化刷新口令 `ac_time_value`（**推荐留空**） |
-| `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` | 旧版三件套：**已不推荐，建议留空**（见「凭据优先级」） |
-| `BILI_COOKIE_FILE` | Cookie 持久化文件路径（默认 `/app/data/bili-cookies.json`） |
 | `TWITTER_POLL_INTERVAL` | 监听轮询间隔（秒，默认 60） |
 | `MEDIA_CACHE_TTL_DAYS` | 媒体缓存保留天数（默认 7；截图不受影响） |
 | `MEDIA_EXPORT_MAX_MB` | 单个媒体文件下载上限（MB，默认 300） |
@@ -63,17 +59,18 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 
 其余变量（端口、轮询等）可留默认，详见 `.env.example`。
 
-### Bilibili Cookie
+> **Bilibili 凭据不在 `.env` 配置**：唯一来源是数据卷里的 `/app/data/bili-cookies.json`，
+> 由扫码登录工具写入、由自动续期回写，路径固定不可改（见下）。
 
-凭据只存一个地方：**cookie 文件**（容器内 `/app/data/bili-cookies.json`，由扫码工具写入、由自动续期回写）。
-`.env` 里的 Cookie 变量只作兜底，**推荐全部留空**（见下方「凭据优先级」）。
+### Bilibili 登录（扫码，唯一方式）
 
-**方式一：扫码登录（推荐，服务器上直接完成）**
+凭据只存一个地方：数据卷里的 **`/app/data/bili-cookies.json`**（路径固定，不可配置）。
+由扫码登录工具写入，之后由 `bili_ticket` / `SESSDATA` 自动续期回写。**不再支持手工填 Cookie 环境变量。**
 
 ```bash
 cd /opt/sekai-bridge
 git pull
-docker compose stop app                                   # 先停 app，避免它把旧 cookie 写回文件
+docker compose stop app                                   # 先停 app，避免它把旧凭据写回文件
 docker compose --profile tools run --rm --build --service-ports bili-login
 #   → 浏览器打开 http://<服务器IP>:18081/ ，用手机 B 站 App 扫码并在手机上确认
 docker compose up -d app
@@ -83,59 +80,23 @@ docker compose logs -f app | grep -i bilibili
 - 二维码三种给法：**网页**（NapCat 式，失效会自动刷新）、**终端里直接打印**（网页打不开时用）、
   以及 PNG `cache/bili-login-qr.png`；网页打不开通常是云服务器安全组没放行 18081（临时放行即可，
   容器退出后端口自动释放）
-- 扫码成功后工具会核对账号昵称，并把新 Cookie **直接写进 app 的数据卷**，所以**不用改 `.env`**
+- 扫码成功后终端会显示账号昵称，并把凭据**直接写进 app 的数据卷**，所以不需要改任何配置
 - 不想要网页时（只打印终端二维码与 PNG）：把命令末尾换成完整脚本调用
   `docker compose --profile tools run --rm --service-ports bili-login node scripts/bili-login.mjs --no-serve`
 - 没有 Docker 环境时可在本地电脑跑同一脚本：`npm install && npm run bili:login`
-  （终端二维码 + 本地网页 `http://127.0.0.1:18081` + `bili-login-qr.png`；可用参数 `--no-serve`、
-  `--host=0.0.0.0`、`--out=<png路径>`、`--cookie-file=<app 的 cookie 文件路径>`）
-
-**方式二：从浏览器复制（手工兜底，不推荐）**
-
-1. 浏览器（用**专用配置文件**，不要无痕窗口——无痕关闭后 localStorage 会被清空，
-   `ac_time_value` 就取不回来了）登录 `https://www.bilibili.com`
-2. `F12` → Network → 任一 `www.bilibili.com` 请求 → Request Headers → 整行复制 `cookie:`，
-   填入 `BILI_COOKIE_STRING`（注意 `document.cookie` 取不到 HttpOnly 的 `SESSDATA`）
-3. `F12` → Application → Local Storage → `https://www.bilibili.com` → 复制 `ac_time_value` 填入
-   `BILI_REFRESH_TOKEN`（`SESSDATA` 自动续期的前提）
-4. 改完 `.env` 后**必须删掉 cookie 文件**，否则文件优先、改动不生效：
-
-```bash
-cd /opt/sekai-bridge
-vim .env        # 填 BILI_COOKIE_STRING / BILI_REFRESH_TOKEN
-docker compose exec app rm -f /app/data/bili-cookies.json
-docker compose restart app
-docker compose logs -f app | grep -i bilibili
-```
-
-**凭据优先级（重要）**
-
-```
-/app/data/bili-cookies.json（扫码工具与自动续期写入）
-   > BILI_COOKIE_STRING（.env，首次登录的原始串）
-      > BILI_SESSDATA + BILI_JCT + BILI_DEDEUSERID（.env，最老三件套）
-```
-
-- 文件存在且有效时，`.env` 里的 Cookie 一律被忽略；用 `BILI_COOKIE_STRING` 时请注意：
-  **改完 `.env` 必须同时删掉 cookie 文件**（`docker compose exec app rm -f /app/data/bili-cookies.json`），否则新值不生效
-- **推荐做法**：只用 cookie 文件（扫码工具维护），把 `.env` 里的
-  `BILI_COOKIE_STRING` / `BILI_REFRESH_TOKEN` / `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` 全部留空
-  （`.env.example` 里这些项默认也是空的）。
-  尤其 `BILI_JCT` 务必留空：`csrf` 参数优先取 Cookie 串里的 `bili_jct`（与 Cookie 头同源），
-  如果 `.env` 里留着一份旧的 `bili_jct`，自动续期轮换后两套凭据会不一致，容易触发 `-111 csrf 校验失败`
-- cookie 文件丢失时（换机器/清卷）app 会明确报"未配置 Cookie"，重跑一次扫码工具即可
+  （终端二维码 + 本地网页 `http://127.0.0.1:18081` + `bili-login-qr.png`）。本机运行会把凭据写到
+  当前目录，再拷进容器即可：`docker compose cp bili-login-cookies.json app:/app/data/bili-cookies.json`
 
 主程序每 6 小时做一次会话体检与自动续期（B 站 Web 端同款机制）：
 
-- **`bili_ticket`**：始终自动续期（有效期 3 天），新值写回 Cookie 文件
+- **`bili_ticket`**：始终自动续期（有效期 3 天），新值写回凭据文件
 - **`SESSDATA`**：B 站提示临近过期时自动续期（`cookie/info` → CorrespondPath →
-  `refresh_csrf` → `cookie/refresh` → `confirm/refresh`），新 Cookie 与**轮换后的
-  `ac_time_value`** 一起写回 Cookie 文件，因此只需配置一次
+  `refresh_csrf` → `cookie/refresh` → `confirm/refresh`），新 Cookie 与**轮换后的刷新口令**
+  一起写回凭据文件，因此只需扫码一次
 - 续期成功日志：`[bilibili] SESSDATA 已自动续期，有效期至 ...`
-- 续期失败（如口令被作废 `code=86095`、被风控）会打印原因：程序遇到 86095 会自动改用
-  `.env` 里的 `BILI_REFRESH_TOKEN`；若仍失败，重新复制 Cookie 与 `ac_time_value` 后
-  删除 Cookie 文件再重启：`docker compose exec app rm -f /app/data/bili-cookies.json`
-- 未配置 `BILI_REFRESH_TOKEN` 时行为与旧版一致：只预警，需人工更新 Cookie
+- 续期失败（如刷新口令被作废 `code=86095`、被风控）会打印原因，并把已失效的刷新口令从文件里清掉；
+  此时**重跑一次上面的扫码登录**即可（旧 SESSDATA 在真正过期前仍能正常发布）
+- `checkSession` 发现凭据文件不存在/失效时，日志会直接给出这条扫码登录命令
 
 > 续期不等于永久免维护：账号被风控强制下线、改密码、或长期未登录时仍需重新登录一次。
 
@@ -183,8 +144,8 @@ docker compose logs -f app | grep -i bilibili
     发布与 `/媒体` **本地优先**（已下载就直接读文件，缺失才下载补齐），不会重复下载
   - 媒体按 `MEDIA_CACHE_TTL_DAYS`（默认 7 天）由后台每 6 小时清理一次；如需彻底清空可整个删除 `cache/media/`（下次自动重新下载）
   - 旧版本遗留的 `cache/twitter-photos/`、`cache/video-thumbnails/`、`cache/exports/` 目录已废弃，可直接删除
-- **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → Cookie 失效 → 重新复制 `BILI_COOKIE_STRING`（连同
-  `BILI_REFRESH_TOKEN`）→ `docker compose up -d app` → `/重试`
+- **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → 登录失效 → 重新扫码登录（见「Bilibili 登录」）→
+  `docker compose up -d app` → `/重试`
 - **Bilibili 必须直连**（勿为其配置代理，会触发 CSRF/风控）；Twitter 媒体如需代理配 `HTTPS_PROXY`
 
 ---

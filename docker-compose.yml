@@ -45,14 +45,8 @@ services:
       - BOOTSTRAP_MODE=latest_only
       - QQ_GROUP_IDS=${QQ_GROUP_IDS:-}
       - QQ_ADMIN_IDS=${QQ_ADMIN_IDS:-}
-      - BILI_SESSDATA=${BILI_SESSDATA:-}
-      - BILI_JCT=${BILI_JCT:-}
-      - BILI_DEDEUSERID=${BILI_DEDEUSERID:-}
-      - BILI_COOKIE_STRING=${BILI_COOKIE_STRING:-}
-      # 可选：持久化刷新口令（ac_time_value），配置后 SESSDATA 自动续期
-      - BILI_REFRESH_TOKEN=${BILI_REFRESH_TOKEN:-}
-      # 可选：cookie 持久化文件（默认 /app/data/bili-cookies.json，与数据库同卷）
-      - BILI_COOKIE_FILE=${BILI_COOKIE_FILE:-/app/data/bili-cookies.json}
+      # Bilibili 凭据不通过环境变量配置：由扫码登录工具写入 /app/data/bili-cookies.json
+      #   docker compose --profile tools run --rm --service-ports bili-login
       - PUBLISH_MODE=manual
       # 媒体缓存（!媒体 指令 / 发布 / 新推文自动下载）
       - FX_TWITTER_BASE_URL=${FX_TWITTER_BASE_URL:-https://api.fxtwitter.com/2}
@@ -74,7 +68,7 @@ services:
   # 一次性工具：B 站扫码登录（NapCat 式网页扫码，成功后直接写 app 的 cookie 文件）
   #   docker compose stop app
   #   docker compose --profile tools run --rm --service-ports bili-login
-  #   → 浏览器打开 http://<服务器IP>:18081/ 扫码；完成后 docker compose start app
+  #   → 浏览器打开 http://<服务器IP>:18081/ 扫码；完成后 docker compose up -d app
   bili-login:
     profiles: ["tools"]
     image: sekai-bridge/app
@@ -84,8 +78,6 @@ services:
     environment:
       - TZ=Asia/Shanghai
       - CACHE_ROOT=/opt/sekai-bridge/cache
-      # 与 app 保持同一个 cookie 文件路径（.env 未设置时脚本默认 /app/data/bili-cookies.json）
-      - BILI_COOKIE_FILE=${BILI_COOKIE_FILE:-}
     volumes:
       - app-data:/app/data
       - /opt/sekai-bridge/cache:/opt/sekai-bridge/cache

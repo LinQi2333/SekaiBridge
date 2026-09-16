@@ -11,8 +11,11 @@ import { TweetToasterClient } from './tweettoaster/client.js';
 
 /**
  * 应用入口：启动数据库、监听/截图/来源检查服务、内部 HTTP API，
- * 以及 Bilibili 会话体检与 bili_ticket 自动续期。
+ * 以及 Bilibili 会话体检与 bili_ticket / SESSDATA 自动续期。
  */
+const BILI_LOGIN_HINT =
+  'docker compose stop app && docker compose --profile tools run --rm --service-ports bili-login && docker compose up -d app';
+
 function main(): void {
   const config = loadConfigFromEnv();
   const database = new AppDatabase({ path: config.databasePath });
@@ -22,19 +25,8 @@ function main(): void {
   const fetchImpl = createProxyFetch();
   const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl, fetchImpl });
   // Bilibili 是国内服务，必须直连（走代理会因出口 IP 不一致触发 CSRF/风控）
-  const biliClient = new BilibiliClient({
-    cookie: {
-      sessdata: config.biliSessdata,
-      jct: config.biliJct,
-      dedeuserid: config.biliDedeuserid,
-    },
-    // 完整 Cookie 串（含 buvid 等指纹）优先，更贴近真实浏览器
-    cookieString: config.biliCookieString,
-    // 持久化刷新口令：配置后 SESSDATA 可自动续期（B 站 Web 端刷新机制）
-    refreshToken: config.biliRefreshToken,
-    // 自动续期（bili_ticket）写回此文件；文件优先于 env
-    cookieFile: config.biliCookieFile,
-  });
+  // 凭据唯一来源：数据目录下的 bili-cookies.json（由扫码登录工具写入，续期时回写）
+  const biliClient = new BilibiliClient({ cookieFile: config.biliCookieFile });
   const services = createServices(repos, {
     config,
     tweetToaster,
@@ -66,15 +58,15 @@ function main(): void {
       const session = await biliClient.checkSession();
       if (!session.loggedIn) {
         console.error(
-          '[bilibili] ⚠️ B站会话已失效（未登录）。请重新复制 cookie 到 .env 后执行 docker compose up -d app',
+          `[bilibili] ⚠️ B站会话已失效（未登录）。请重新扫码登录：${BILI_LOGIN_HINT}`,
         );
         return;
       }
       if (session.refreshNeeded) {
-        // B 站提示 SESSDATA 临近过期：配置了刷新口令就自动续期，否则只能人工换 cookie
+        // B 站提示 SESSDATA 临近过期：有刷新口令就自动续期，否则只能重新扫码
         if (!biliClient.canRefreshCookie()) {
           console.error(
-            '[bilibili] ⚠️ B站提示会话需要刷新（SESSDATA 临近过期）。配置 BILI_REFRESH_TOKEN（浏览器 localStorage 的 ac_time_value）可自动续期；否则请尽快重新复制 cookie',
+            `[bilibili] ⚠️ B站提示会话需要刷新（SESSDATA 临近过期），但凭据文件里没有刷新口令。请重新扫码登录：${BILI_LOGIN_HINT}`,
           );
         } else {
           const refresh = await biliClient.refreshLoginCookie();
@@ -85,7 +77,7 @@ function main(): void {
             console.log(`[bilibili] SESSDATA 已自动续期${until}（新 Cookie 与刷新口令已写回文件）`);
           } else {
             console.error(
-              `[bilibili] ⚠️ SESSDATA 自动续期失败：${refresh.reason}。请重新复制 cookie 到 .env 后 docker compose up -d app`,
+              `[bilibili] ⚠️ SESSDATA 自动续期失败：${refresh.reason}。请重新扫码登录：${BILI_LOGIN_HINT}`,
             );
           }
         }
