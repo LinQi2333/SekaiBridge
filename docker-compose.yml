@@ -49,6 +49,8 @@ services:
       - BILI_JCT=${BILI_JCT:-}
       - BILI_DEDEUSERID=${BILI_DEDEUSERID:-}
       - BILI_COOKIE_STRING=${BILI_COOKIE_STRING:-}
+      # 可选：持久化刷新口令（ac_time_value），配置后 SESSDATA 自动续期
+      - BILI_REFRESH_TOKEN=${BILI_REFRESH_TOKEN:-}
       # 可选：cookie 持久化文件（默认 /app/data/bili-cookies.json，与数据库同卷）
       - BILI_COOKIE_FILE=${BILI_COOKIE_FILE:-}
       - PUBLISH_MODE=manual

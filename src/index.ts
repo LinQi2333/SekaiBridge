@@ -30,6 +30,8 @@ function main(): void {
     },
     // 完整 Cookie 串（含 buvid 等指纹）优先，更贴近真实浏览器
     cookieString: config.biliCookieString,
+    // 持久化刷新口令：配置后 SESSDATA 可自动续期（B 站 Web 端刷新机制）
+    refreshToken: config.biliRefreshToken,
     // 自动续期（bili_ticket）写回此文件；文件优先于 env
     cookieFile: config.biliCookieFile,
   });
@@ -69,9 +71,24 @@ function main(): void {
         return;
       }
       if (session.refreshNeeded) {
-        console.error(
-          '[bilibili] ⚠️ B站提示会话需要刷新（SESSDATA 临近过期）。建议尽快重新复制 cookie，避免发布中断',
-        );
+        // B 站提示 SESSDATA 临近过期：配置了刷新口令就自动续期，否则只能人工换 cookie
+        if (!biliClient.canRefreshCookie()) {
+          console.error(
+            '[bilibili] ⚠️ B站提示会话需要刷新（SESSDATA 临近过期）。配置 BILI_REFRESH_TOKEN（浏览器 localStorage 的 ac_time_value）可自动续期；否则请尽快重新复制 cookie',
+          );
+        } else {
+          const refresh = await biliClient.refreshLoginCookie();
+          if (refresh.refreshed) {
+            const until = refresh.sessdataExpiresAt
+              ? `，有效期至 ${new Date(refresh.sessdataExpiresAt).toISOString()}`
+              : '';
+            console.log(`[bilibili] SESSDATA 已自动续期${until}（新 Cookie 与刷新口令已写回文件）`);
+          } else {
+            console.error(
+              `[bilibili] ⚠️ SESSDATA 自动续期失败：${refresh.reason}。请重新复制 cookie 到 .env 后 docker compose up -d app`,
+            );
+          }
+        }
       }
       const ticket = await biliClient.refreshTicket();
       if (ticket) {

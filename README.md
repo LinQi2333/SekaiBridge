@@ -52,6 +52,7 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 | `QQ_ADMIN_IDS` | 管理员 QQ 号，逗号分隔（必填；群主/群管理员自动拥有管理权限） |
 | `API_TOKEN` | 内部 API 密钥，`openssl rand -hex 32` 生成（必填） |
 | `BILI_COOKIE_STRING` | Bilibili 发布账号完整 Cookie 串（推荐；见下） |
+| `BILI_REFRESH_TOKEN` | 持久化刷新口令（`ac_time_value`）：配置后 `SESSDATA` 自动续期（见下） |
 | `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` | 未提供完整串时的最小三件套（可选） |
 | `BILI_COOKIE_FILE` | Cookie 持久化文件路径（默认数据库同目录，自动续期写回） |
 | `TWITTER_POLL_INTERVAL` | 监听轮询间隔（秒，默认 60） |
@@ -67,10 +68,23 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 1. 浏览器（建议隐私窗口，与日常登录隔离）登录 `https://www.bilibili.com`
 2. `F12` → 存储/Application → Cookies，把登录后产生的 cookie 逐条复制为
    `SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; buvid3=xxx; ...` 填入 `BILI_COOKIE_STRING`
-3. 验证：`docker compose up -d app` 后看启动日志；或调用 nav 查询确认 `isLogin: true`
+3. 同一面板 → Local Storage → `https://www.bilibili.com` → 复制 `ac_time_value` 的值填入
+   `BILI_REFRESH_TOKEN`（这是 B 站官方的持久化刷新口令，是 `SESSDATA` 自动续期的前提）
+4. 验证：`docker compose up -d app` 后看启动日志；或调用 nav 查询确认 `isLogin: true`
 
-主程序会**自动续期 `bili_ticket`**（浏览器同款机制）并把新值写回 Cookie 文件；
-`SESSDATA` 临近过期时会输出预警日志，按提示重新复制 Cookie 即可。
+主程序每 6 小时做一次会话体检与自动续期（B 站 Web 端同款机制）：
+
+- **`bili_ticket`**：始终自动续期（有效期 3 天），新值写回 Cookie 文件
+- **`SESSDATA`**：B 站提示临近过期时自动续期（`cookie/info` → CorrespondPath →
+  `refresh_csrf` → `cookie/refresh` → `confirm/refresh`），新 Cookie 与**轮换后的
+  `ac_time_value`** 一起写回 Cookie 文件，因此只需配置一次
+- 续期成功日志：`[bilibili] SESSDATA 已自动续期，有效期至 ...`
+- 续期失败（如口令被作废 `code=86095`、被风控）会打印原因：程序遇到 86095 会自动改用
+  `.env` 里的 `BILI_REFRESH_TOKEN`；若仍失败，重新复制 Cookie 与 `ac_time_value` 后
+  删除 Cookie 文件再重启：`docker compose exec app rm -f /app/data/bili-cookies.json`
+- 未配置 `BILI_REFRESH_TOKEN` 时行为与旧版一致：只预警，需人工更新 Cookie
+
+> 续期不等于永久免维护：账号被风控强制下线、改密码、或长期未登录时仍需重新登录一次。
 
 ---
 
@@ -114,7 +128,8 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
   - `cache/media/<推文ID>/`：推文原图与视频，`photo<n>.<ext>` / `video<n>.<ext>`；新推文入库即自动下载，发布与 `/媒体` 直接读取本地文件，不再重复下载
   - 媒体按 `MEDIA_CACHE_TTL_DAYS`（默认 7 天）由后台每 6 小时清理一次；如需彻底清空可整个删除 `cache/media/`（下次自动重新下载）
   - 旧版本遗留的 `cache/twitter-photos/`、`cache/video-thumbnails/`、`cache/exports/` 目录已废弃，可直接删除
-- **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → Cookie 失效 → 重新复制 `BILI_COOKIE_STRING` → `docker compose up -d app` → `/重试`
+- **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → Cookie 失效 → 重新复制 `BILI_COOKIE_STRING`（连同
+  `BILI_REFRESH_TOKEN`）→ `docker compose up -d app` → `/重试`
 - **Bilibili 必须直连**（勿为其配置代理，会触发 CSRF/风控）；Twitter 媒体如需代理配 `HTTPS_PROXY`
 
 ---

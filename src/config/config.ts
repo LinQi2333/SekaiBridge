@@ -50,6 +50,11 @@ export interface AppConfig {
    */
   biliCookieString: string;
   /**
+   * 持久化刷新口令（浏览器 localStorage 的 `ac_time_value`）。
+   * 配置后 SESSDATA 临近过期时自动续期；留空则只能人工更新 Cookie。
+   */
+  biliRefreshToken: string;
+  /**
    * Cookie 持久化文件（自动续期写入用）。B 站返回的新 cookie（如 bili_ticket）
    * 会写回该文件并在下次启动时优先读取；默认放在数据库同目录。
    */
@@ -135,6 +140,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliJct: env.BILI_JCT ?? '',
     biliDedeuserid: env.BILI_DEDEUSERID ?? '',
     biliCookieString: env.BILI_COOKIE_STRING ?? '',
+    biliRefreshToken: env.BILI_REFRESH_TOKEN ?? '',
     biliCookieFile: env.BILI_COOKIE_FILE ?? path.join(path.dirname(path.resolve(env.DATABASE_PATH ?? './data/app.db')), 'bili-cookies.json'),
     publishMode,
     fxTwitterBaseUrl: (env.FX_TWITTER_BASE_URL ?? 'https://api.fxtwitter.com/2').replace(/\/+$/, ''),
