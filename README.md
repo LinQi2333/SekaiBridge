@@ -77,22 +77,38 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
    `BILI_REFRESH_TOKEN`（B 站官方的持久化刷新口令，是 `SESSDATA` 自动续期的前提）
 4. 验证：`docker compose up -d app` 后看启动日志；或调用 nav 查询确认 `isLogin: true`
 
-**方式二：扫码登录脚本**（无需浏览器，服务器/本地都能跑）
+**方式二：扫码登录（推荐，服务器上直接完成，无需浏览器插件/DevTools）**
+
+```bash
+cd /opt/sekai-bridge
+git pull
+docker compose stop app                                   # 先停 app，避免它把旧 cookie 写回文件
+docker compose --profile tools run --rm --build --service-ports bili-login
+#   → 浏览器打开 http://<服务器IP>:18081/ ，用手机 B 站 App 扫码并在手机上确认
+docker compose up -d app
+docker compose logs -f app | grep -i bilibili
+```
+
+- 二维码三种给法：**网页**（NapCat 式，失败会自动刷新二维码）、**终端里直接打印**（网页打不开时用）、
+  以及 PNG `cache/bili-login-qr.png`；网页打不开通常是云服务器安全组没放行 18081（临时放行即可，
+  容器退出后端口自动释放）
+- 扫码成功后工具会核对账号昵称，并把新 Cookie **直接写进 app 的数据卷**
+  （`/app/data/bili-cookies.json`），所以**不用改 `.env`**；同时也会打印两行 `.env` 片段
+  （建议顺手更新 `.env` 作为兜底：app 读文件优先，文件丢了才会回退 `.env`）
+- 不想要网页时：`docker compose --profile tools run --rm --service-ports bili-login --no-serve`
+
+**方式二（本机版）**：没有 Docker 环境时可在本地电脑跑同一脚本，再把结果填进服务器 `.env`：
 
 ```bash
 npm install            # 首次：安装二维码依赖 qrcode
-npm run bili:login     # 生成二维码并等待扫码
+npm run bili:login     # 终端二维码 + 本地网页 http://127.0.0.1:18081 + bili-login-qr.png
 ```
 
-- 终端会直接打印二维码，同时写入 `bili-login-qr.png`，并启动本地网页 `http://127.0.0.1:18081`
-  （手机 B 站 App 扫码 → 手机上确认；请确认扫的是**发布账号**）
-- 终端二维码显示不正常时，可打开网页，或把脚本打印的链接粘到手机浏览器打开
-- 成功后脚本会核对账号昵称，并输出 `BILI_COOKIE_STRING` 与 `BILI_REFRESH_TOKEN`，
-  同时写入 `bili-login.env`（**含凭据，贴到服务器 `.env` 后请删除**）
-- 常用参数：`--no-serve`（不启动网页）、`--host=0.0.0.0`（局域网内其他设备打开网页）、
-  `--out=<png路径>`、`--timeout=150`
+成功后脚本输出 `BILI_COOKIE_STRING` 与 `BILI_REFRESH_TOKEN`，并写入 `bili-login.env`
+（**含凭据，贴完请删除**）。常用参数：`--no-serve`、`--host=0.0.0.0`、`--out=<png路径>`、
+`--cookie-file=<路径>`（直接写 app 的 cookie 文件）。
 
-**更新服务器 .env 后**（两种方式都适用）：
+**改用 .env 方式时**（方式一，或本机版脚本）：
 
 ```bash
 cd /opt/sekai-bridge

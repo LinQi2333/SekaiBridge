@@ -10,6 +10,8 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+# 一次性工具脚本（B 站扫码登录：docker compose --profile tools run --rm bili-login）
+COPY scripts ./scripts
 RUN npm run build
 # 剔除 devDependencies，只保留运行时依赖（better-sqlite3 已在上面编译好）
 RUN npm prune --omit=dev
@@ -24,6 +26,7 @@ ENV NODE_ENV=production
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=build /app/scripts ./scripts
 # 运行时数据目录（app-data volume 挂载点）
 RUN mkdir -p /app/data
 EXPOSE 18080

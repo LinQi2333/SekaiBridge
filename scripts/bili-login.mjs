@@ -5,14 +5,19 @@
  * 用法：
  *   npm run bili:login                     # 默认：生成二维码 PNG + 本地网页 + 终端二维码
  *   npm run bili:login -- --no-serve       # 只写 PNG 与终端二维码（无网页）
- *   npm run bili:login -- --host=0.0.0.0   # 让同局域网的其他设备打开网页
+ *   npm run bili:login -- --host=0.0.0.0   # 让同局域网/公网的其他设备打开网页
  *   npm run bili:login -- --out=/opt/sekai-bridge/cache/bili-login-qr.png
+ *
+ * 服务器（Docker）用法：
+ *   docker compose --profile tools run --rm --service-ports bili-login
+ *   → 浏览器打开 http://<服务器IP>:18081/ 扫码；成功后直接写入 /app/data/bili-cookies.json
  *
  * 扫码流程（B 站 Web 端官方接口）：
  *   申请二维码 → 手机 B 站 App 扫码并在手机上确认 → 拿到 Cookie 与 refresh_token(ac_time_value)
  *
- * 输出：屏幕打印 + `bili-login.env`（两行 .env 片段，含凭据，贴完请删除）
- * 该脚本只在本地/服务器一次性运行，不属于应用运行时依赖。
+ * 输出：屏幕打印 + `bili-login.env`（两行 .env 片段，含凭据，贴完请删除）；
+ *       容器内检测到 /app/data 时还会直接写入 app 的 cookie 文件（无需改 .env）
+ * 该脚本只在需要重新登录时一次性运行，不属于应用运行时逻辑。
  */
 import fs from 'node:fs';
 import http from 'node:http';
@@ -94,12 +99,18 @@ export function parseArgs(argv) {
     terminal: true,
     timeoutSec: 150,
     maxQr: 3,
+    // 容器内（/app/data 存在）默认直接写 app 的 cookie 文件；本地运行则不写
+    cookieFile:
+      process.env.BILI_COOKIE_FILE ||
+      (fs.existsSync('/app/data') ? '/app/data/bili-cookies.json' : null),
   };
   for (const arg of argv) {
     if (arg === '--no-serve') options.serve = false;
     else if (arg === '--no-terminal') options.terminal = false;
+    else if (arg === '--no-cookie-file') options.cookieFile = null;
     else if (arg.startsWith('--out=')) options.out = arg.slice(6);
     else if (arg.startsWith('--env-out=')) options.envOut = arg.slice(10);
+    else if (arg.startsWith('--cookie-file=')) options.cookieFile = arg.slice(14);
     else if (arg.startsWith('--host=')) options.host = arg.slice(7);
     else if (arg.startsWith('--port=')) options.port = Number.parseInt(arg.slice(7), 10);
     else if (arg.startsWith('--timeout=')) options.timeoutSec = Number.parseInt(arg.slice(10), 10);
@@ -111,6 +122,11 @@ export function parseArgs(argv) {
     }
   }
   return options;
+}
+
+/** app 侧 cookie 文件的格式（src/bilibili/client.ts 读取同一结构）。 */
+export function buildCookieFilePayload(cookieString, refreshToken) {
+  return { cookieString, refreshToken, updatedAt: new Date().toISOString() };
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -179,7 +195,7 @@ function renderPage() {
     <p>登录的是发布账号（如 Project_SEKAI资讯站），确认后本页会提示成功</p>
     <img src="/qr.png" alt="登录二维码">
     <div id="status">等待扫码…</div>
-    <p>二维码 3 分钟内有效；成功后回到终端复制输出的两行 .env</p>
+    <p>二维码 3 分钟内有效；成功后本容器会自动退出（结果见终端输出）</p>
     <code id="url"></code>
   </div>
 <script>
@@ -208,7 +224,9 @@ async function main() {
         '用法: npm run bili:login -- [选项]',
         '  --out=<path>       二维码 PNG 输出路径（默认 CACHE_ROOT/bili-login-qr.png 或 ./bili-login-qr.png）',
         '  --env-out=<path>   .env 片段输出路径（默认 ./bili-login.env）',
-        '  --host=127.0.0.1   网页监听地址（默认仅本机；0.0.0.0 可让局域网设备访问）',
+        '  --cookie-file=<path>  直接写入 app 的 cookie 文件（容器内默认 /app/data/bili-cookies.json）',
+        '  --no-cookie-file   不写 cookie 文件',
+        '  --host=127.0.0.1   网页监听地址（默认仅本机；0.0.0.0 可让其他设备访问）',
         '  --port=18081       网页端口',
         '  --no-serve         不启动本地网页',
         '  --no-terminal      不在终端打印二维码',
@@ -340,7 +358,7 @@ async function onSuccess(result, options) {
   }
 
   const envContent = [
-    '# 由 npm run bili:login 生成；贴到服务器 .env 后请删除本文件',
+    '# 由 bili-login 生成；贴到服务器 .env 后请删除本文件',
     `BILI_COOKIE_STRING=${cookieString}`,
     `BILI_REFRESH_TOKEN=${refreshToken}`,
     '',
@@ -348,20 +366,44 @@ async function onSuccess(result, options) {
   const envPath = path.resolve(options.envOut);
   fs.writeFileSync(envPath, envContent, { mode: 0o600 });
 
+  // 容器内：直接写 app 的 cookie 文件（app 读文件优先于 .env，省去改 .env 的步骤）
+  let cookieFilePath = null;
+  if (options.cookieFile) {
+    try {
+      const target = path.resolve(options.cookieFile);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, JSON.stringify(buildCookieFilePayload(cookieString, refreshToken), null, 2), {
+        mode: 0o600,
+      });
+      cookieFilePath = target;
+    } catch (error) {
+      console.error(
+        `[bili-login] cookie 文件写入失败（${options.cookieFile}）：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
   console.log('\n================ 登录成功 ================');
   console.log(`账号：${who}`);
   if (skipped.length > 0) {
     console.log(`已跳过含特殊字符的值：${skipped.join(', ')}`);
   }
-  console.log('\n把下面两行贴进服务器的 .env（或直接用生成的片段文件）：\n');
-  console.log(`BILI_COOKIE_STRING=${cookieString}`);
-  console.log(`BILI_REFRESH_TOKEN=${refreshToken}`);
-  console.log(`\n片段文件：${envPath}（含凭据，贴完请删除）`);
-  console.log('\n服务器上更新 .env 后执行：');
-  console.log('  docker compose up -d --build app');
-  console.log('  docker compose exec app rm -f /app/data/bili-cookies.json');
-  console.log('  docker compose restart app');
-  console.log('  docker compose logs -f app | grep -i bilibili');
+  console.log('\nBILI_COOKIE_STRING=' + cookieString);
+  console.log('BILI_REFRESH_TOKEN=' + refreshToken);
+  console.log(`\n.env 片段文件：${envPath}（含凭据，贴完请删除）`);
+
+  if (cookieFilePath) {
+    console.log(`\n已直接写入 app 的 cookie 文件：${cookieFilePath}`);
+    console.log('接下来只需要重启 app（无需改 .env）：');
+    console.log('  docker compose up -d app');
+    console.log('  docker compose logs -f app | grep -i bilibili');
+  } else {
+    console.log('\n服务器上更新 .env 后执行：');
+    console.log('  docker compose up -d --build app');
+    console.log('  docker compose exec app rm -f /app/data/bili-cookies.json');
+    console.log('  docker compose restart app');
+    console.log('  docker compose logs -f app | grep -i bilibili');
+  }
   console.log('=========================================\n');
 }
 
