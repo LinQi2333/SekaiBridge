@@ -13,7 +13,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bili:login": "node scripts/bili-login.mjs"
   },
   "keywords": [
     "twitter",
@@ -31,6 +32,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.4.0",
+    "qrcode": "^1.5.4",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11"

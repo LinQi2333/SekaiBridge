@@ -65,12 +65,43 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 
 ### Bilibili Cookie
 
-1. 浏览器（建议隐私窗口，与日常登录隔离）登录 `https://www.bilibili.com`
+**方式一：从浏览器复制**（需要能开浏览器）
+
+1. 浏览器（建议用一个**专用配置文件**，不要用无痕窗口——无痕关闭后 localStorage 会被清空，
+   `ac_time_value` 就取不回来了）登录 `https://www.bilibili.com`
 2. `F12` → 存储/Application → Cookies，把登录后产生的 cookie 逐条复制为
    `SESSDATA=xxx; bili_jct=xxx; DedeUserID=xxx; buvid3=xxx; ...` 填入 `BILI_COOKIE_STRING`
-3. 同一面板 → Local Storage → `https://www.bilibili.com` → 复制 `ac_time_value` 的值填入
-   `BILI_REFRESH_TOKEN`（这是 B 站官方的持久化刷新口令，是 `SESSDATA` 自动续期的前提）
+   （也可以从 Network → 任一 `www.bilibili.com` 请求的 Request Headers 里整行复制 `cookie:`，
+   注意 `document.cookie` 取不到 HttpOnly 的 `SESSDATA`）
+3. 同一面板 → Local Storage → `https://www.bilibili.com` → 复制 `ac_time_value` 填入
+   `BILI_REFRESH_TOKEN`（B 站官方的持久化刷新口令，是 `SESSDATA` 自动续期的前提）
 4. 验证：`docker compose up -d app` 后看启动日志；或调用 nav 查询确认 `isLogin: true`
+
+**方式二：扫码登录脚本**（无需浏览器，服务器/本地都能跑）
+
+```bash
+npm install            # 首次：安装二维码依赖 qrcode
+npm run bili:login     # 生成二维码并等待扫码
+```
+
+- 终端会直接打印二维码，同时写入 `bili-login-qr.png`，并启动本地网页 `http://127.0.0.1:18081`
+  （手机 B 站 App 扫码 → 手机上确认；请确认扫的是**发布账号**）
+- 终端二维码显示不正常时，可打开网页，或把脚本打印的链接粘到手机浏览器打开
+- 成功后脚本会核对账号昵称，并输出 `BILI_COOKIE_STRING` 与 `BILI_REFRESH_TOKEN`，
+  同时写入 `bili-login.env`（**含凭据，贴到服务器 `.env` 后请删除**）
+- 常用参数：`--no-serve`（不启动网页）、`--host=0.0.0.0`（局域网内其他设备打开网页）、
+  `--out=<png路径>`、`--timeout=150`
+
+**更新服务器 .env 后**（两种方式都适用）：
+
+```bash
+cd /opt/sekai-bridge
+vim .env        # 覆盖 BILI_COOKIE_STRING，填好 BILI_REFRESH_TOKEN
+docker compose up -d --build app
+docker compose exec app rm -f /app/data/bili-cookies.json   # 清掉旧 cookie 文件，避免覆盖 .env
+docker compose restart app
+docker compose logs -f app | grep -i bilibili
+```
 
 主程序每 6 小时做一次会话体检与自动续期（B 站 Web 端同款机制）：
 
@@ -160,6 +191,7 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 src/              主程序（TypeScript）
   config/ db/ domain/ repositories/ services/
   tweettoaster/ media/ api/ bilibili/
+scripts/          辅助脚本（bili-login.mjs：B 站扫码登录）
 nonebot-plugin/   NoneBot2 插件（QQ 命令与通知）
 docker-compose.yml 全栈编排（QQ 侧在 profile "full" 下）
 start.sh         一键启动/状态/日志/停止

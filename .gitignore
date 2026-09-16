@@ -13,6 +13,10 @@ cache/
 .env.local
 *.local
 
+# B 站扫码登录产物（含凭据，禁止入库）
+bili-login.env
+bili-login-qr.png
+
 # logs
 logs/
 *.log
