@@ -52,10 +52,11 @@ services:
       # 可选：cookie 持久化文件（默认 /app/data/bili-cookies.json，与数据库同卷）
       - BILI_COOKIE_FILE=${BILI_COOKIE_FILE:-}
       - PUBLISH_MODE=manual
-      # 媒体导出（!媒体 指令）
+      # 媒体缓存（!媒体 指令 / 发布 / 新推文自动下载）
       - FX_TWITTER_BASE_URL=${FX_TWITTER_BASE_URL:-https://api.fxtwitter.com/2}
       - MEDIA_EXPORT_MAX_MB=${MEDIA_EXPORT_MAX_MB:-300}
       - MAX_GROUP_FILE_MB=${MAX_GROUP_FILE_MB:-100}
+      - MEDIA_CACHE_TTL_DAYS=${MEDIA_CACHE_TTL_DAYS:-7}
       - API_PORT=18080
       - API_TOKEN=${API_TOKEN:-}
       # 可选代理：访问 Twitter 图床被墙时配置（与 tweettoaster 共用）

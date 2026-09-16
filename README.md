@@ -55,6 +55,9 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 | `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` | 未提供完整串时的最小三件套（可选） |
 | `BILI_COOKIE_FILE` | Cookie 持久化文件路径（默认数据库同目录，自动续期写回） |
 | `TWITTER_POLL_INTERVAL` | 监听轮询间隔（秒，默认 60） |
+| `MEDIA_CACHE_TTL_DAYS` | 媒体缓存保留天数（默认 7；截图不受影响） |
+| `MEDIA_EXPORT_MAX_MB` | 单个媒体文件下载上限（MB，默认 300） |
+| `MAX_GROUP_FILE_MB` | QQ 群文件上限（MB，默认 100；超过则不上传并提示） |
 | `HTTPS_PROXY` / `HTTP_PROXY` | 可选代理：访问 Twitter 图床被墙时配置 |
 
 其余变量（端口、轮询等）可留默认，详见 `.env.example`。
@@ -88,7 +91,9 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 | `/刷新 [@账号]` | 管理员 | 立即轮询一次 |
 
 - 编号为**账号内独立编号**；未指定账号的命令作用于默认账号
-- 新推文自动通知群（含推文截图），不含原文正文；视频与视频封面不下载、不发送
+- 新推文入库即自动下载原图（最高画质）并在后台缓存，通知群时只发文本 + 推文截图
+- `/媒体` 复用同一批缓存文件上传群文件（图片 `photo<n>.jpg|png`、视频 `video<n>.mp4`）；
+  超过 `MAX_GROUP_FILE_MB` 或下载失败的文件会单独列出跳过原因
 
 ---
 
@@ -103,7 +108,12 @@ vim .env        # 必填：QQ_GROUP_IDS / QQ_ADMIN_IDS / API_TOKEN / BILI_COOKIE
 ```
 
 - **更新**：`git pull && ./start.sh`
-- **数据**：数据库在 volume `app-data`（`/app/data/app.db`）；媒体缓存在 `cache/`（与宿主机同路径挂载，可安全清空）
+- **数据**：数据库在 volume `app-data`（`/app/data/app.db`）；缓存在 `cache/`（与宿主机同路径挂载，NapCat 直接按绝对路径读取）
+- **缓存目录**：
+  - `cache/screenshots/<推文ID>.png`：推文截图，**永久保留**（数据库会引用，请勿手动删除）
+  - `cache/media/<推文ID>/`：推文原图与视频，`photo<n>.<ext>` / `video<n>.<ext>`；新推文入库即自动下载，发布与 `/媒体` 直接读取本地文件，不再重复下载
+  - 媒体按 `MEDIA_CACHE_TTL_DAYS`（默认 7 天）由后台每 6 小时清理一次；如需彻底清空可整个删除 `cache/media/`（下次自动重新下载）
+  - 旧版本遗留的 `cache/twitter-photos/`、`cache/video-thumbnails/`、`cache/exports/` 目录已废弃，可直接删除
 - **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → Cookie 失效 → 重新复制 `BILI_COOKIE_STRING` → `docker compose up -d app` → `/重试`
 - **Bilibili 必须直连**（勿为其配置代理，会触发 CSRF/风控）；Twitter 媒体如需代理配 `HTTPS_PROXY`
 

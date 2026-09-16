@@ -1,18 +1,16 @@
-import path from 'node:path';
+import fs from 'node:fs/promises';
 import type { DynamicPublisher } from '../bilibili/dynamic-publisher.js';
 import type { ImageUploader, UploadedImage } from '../bilibili/image-upload.js';
 import type { BiliTopic } from '../domain/topic.js';
 import { PublishStatus, type PublishRecord } from '../domain/publish.js';
-import { photoMedia } from '../domain/tweet.js';
 import { WorkflowStatus } from '../domain/workflow.js';
-import { EXT_BY_CONTENT_TYPE, safeDownload } from '../media/safe-download.js';
-import type { MediaFetcher } from '../media/media-fetcher.js';
 import { PublishRepository } from '../repositories/publish-repository.js';
 import { TopicRepository } from '../repositories/topic-repository.js';
 import { TranslationRepository } from '../repositories/translation-repository.js';
 import { TweetRepository } from '../repositories/tweet-repository.js';
 import { log } from '../logger.js';
 import { NotFoundError, NotImplementedError, ValidationError } from './errors.js';
+import type { MediaLibrary } from './media-library.js';
 import type { WorkflowService } from './workflow-service.js';
 
 export interface PublishResult {
@@ -41,10 +39,11 @@ export interface DefaultPublishServiceOptions {
   workflow: WorkflowService;
   imageUploader: ImageUploader;
   dynamicPublisher: DynamicPublisher;
-  /** 发布时下载 Twitter 原图用（测试注入 mock fetch）。 */
-  fetchImpl?: typeof fetch;
-  /** 媒体获取策略（默认直连 safeDownload；容器接线时走 TweetToaster 代理）。 */
-  fetcher?: MediaFetcher;
+  /**
+   * 媒体库：发布时直接读取 cache/media/<推文ID>/ 下的原图；
+   * 没有缓存时由媒体库按需下载（不传则用 stub，测试需注入）。
+   */
+  media: MediaLibrary;
 }
 
 export class DefaultPublishService implements PublishService {
@@ -55,8 +54,7 @@ export class DefaultPublishService implements PublishService {
   private readonly workflow: WorkflowService;
   private readonly imageUploader: ImageUploader;
   private readonly dynamicPublisher: DynamicPublisher;
-  private readonly fetchImpl: typeof fetch;
-  private readonly fetcher: MediaFetcher;
+  private readonly media: MediaLibrary;
 
   constructor(options: DefaultPublishServiceOptions) {
     this.tweets = options.tweets;
@@ -66,13 +64,7 @@ export class DefaultPublishService implements PublishService {
     this.workflow = options.workflow;
     this.imageUploader = options.imageUploader;
     this.dynamicPublisher = options.dynamicPublisher;
-    this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
-    this.fetcher =
-      options.fetcher ??
-      (async (url) => {
-        const result = await safeDownload(url, { fetchImpl: this.fetchImpl });
-        return { bytes: result.bytes, contentType: result.contentType };
-      });
+    this.media = options.media;
   }
 
   async publish(tweetId: number, topicAlias?: string): Promise<PublishResult> {
@@ -115,14 +107,14 @@ export class DefaultPublishService implements PublishService {
 
     try {
       // 只上传 photo（§21 / §53）；视频与视频封面永不进入 pics[]
-      const photos = photoMedia(tweet);
+      // 直接读取 cache/media/<推文ID>/ 下的原图（缺失时才由媒体库补下载）
+      const photos = await this.media.ensurePhotos(tweetId);
       const pics: UploadedImage[] = [];
       for (const photo of photos) {
-        const { bytes, contentType } = await this.fetcher(photo.url);
-        const filename = filenameForPhoto(photo.url, contentType);
-        const uploaded = await this.imageUploader.uploadImage(bytes, filename);
+        const bytes = await fs.readFile(photo.absPath);
+        const uploaded = await this.imageUploader.uploadImage(bytes, photo.name);
         pics.push(uploaded);
-        log('bilibili.upload.complete', `#${tweetId} ${uploaded.url}`);
+        log('bilibili.upload.complete', `#${tweetId} ${photo.name} → ${uploaded.url}`);
       }
 
       log('bilibili.publish.started', `#${tweetId} 文本 + ${pics.length} 张图片`);
@@ -155,22 +147,6 @@ export class DefaultPublishService implements PublishService {
   isPublished(tweetId: number): boolean {
     return this.publishes.findSuccessfulByTweet(tweetId) !== null;
   }
-}
-
-/** 从 photo URL 推断上传文件名（含扩展名，Bilibili 按扩展名处理）。 */
-export function filenameForPhoto(url: string, contentType: string): string {
-  try {
-    const pathname = new URL(url).pathname;
-    const base = path.basename(pathname).replace(/[^\w.-]/g, '_');
-    const ext = path.extname(base).toLowerCase();
-    if (ext && /^\.(jpg|jpeg|png|webp|gif|avif)$/.test(ext)) {
-      return base;
-    }
-  } catch {
-    // 忽略 URL 解析失败，走 Content-Type 兜底
-  }
-  const ext = EXT_BY_CONTENT_TYPE[contentType] ?? 'jpg';
-  return `twitter-${Date.now()}.${ext}`;
 }
 
 export class StubPublishService implements PublishService {

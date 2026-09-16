@@ -93,6 +93,22 @@ function main(): void {
   cookieTimer.unref?.();
   console.log('[boot] bilibili cookie maintenance started (every 6h)');
 
+  // 媒体缓存清理（MEDIA_CACHE_TTL_DAYS，默认 7 天；截图永久保留）
+  const mediaCleanup = async (): Promise<void> => {
+    try {
+      const removed = await services.media.cleanupOlderThan(config.mediaCacheTtlDays);
+      console.log(
+        `[media] 清理完成：删除 ${removed.files} 个文件、${removed.dirs} 个空目录（阈值 ${config.mediaCacheTtlDays} 天）`,
+      );
+    } catch (error) {
+      console.error('[media] 清理失败:', error instanceof Error ? error.message : String(error));
+    }
+  };
+  void mediaCleanup();
+  const mediaTimer = setInterval(() => void mediaCleanup(), COOKIE_MAINTENANCE_MS);
+  mediaTimer.unref?.();
+  console.log(`[boot] media cache cleanup started (keep ${config.mediaCacheTtlDays}d, every 6h)`);
+
   // 内部 HTTP API：NoneBot2（连 NapCat）与未来 Web 调用（规格 §2.2）
   const apiServer = createApiServer({
     services,
@@ -108,6 +124,7 @@ function main(): void {
   const shutdown = (signal: string): void => {
     console.log(`[boot] received ${signal}, closing...`);
     clearInterval(cookieTimer);
+    clearInterval(mediaTimer);
     services.monitor.stop();
     services.sourceValidation.stop();
     apiServer.close();

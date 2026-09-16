@@ -31,12 +31,7 @@ import {
   StubScreenshotService,
   type ScreenshotService,
 } from './screenshot-service.js';
-import { DefaultMediaService, StubMediaService, type MediaService } from './media-service.js';
-import {
-  DefaultMediaExportService,
-  StubMediaExportService,
-  type MediaExportService,
-} from './media-export-service.js';
+import { DefaultMediaLibrary, StubMediaLibrary, type MediaLibrary } from './media-library.js';
 import {
   DefaultNewTweetProcessor,
   type NewTweetProcessor,
@@ -63,9 +58,8 @@ export interface AppServices {
   monitor: MonitorService;
   sourceValidation: SourceValidationService;
   screenshot: ScreenshotService;
-  media: MediaService;
-  /** 推文媒体导出（!媒体 指令：原图 + 最高码率视频）。 */
-  mediaExport: MediaExportService;
+  /** 推文媒体库（图片/视频统一存放 cache/media/<推文ID>/）。 */
+  media: MediaLibrary;
   newTweetProcessor: NewTweetProcessor;
 }
 
@@ -122,25 +116,16 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
         fetchImpl,
       })
     : new StubScreenshotService();
-  const media: MediaService = deps
-    ? new DefaultMediaService({
-        tweets: repos.tweets,
-        cacheRoot: deps.config.cacheRoot,
-        fetchImpl,
-        fetcher: mediaFetcher,
-      })
-    : new StubMediaService();
-  const mediaExport: MediaExportService = deps
-    ? new DefaultMediaExportService({
+  const media: MediaLibrary = deps
+    ? new DefaultMediaLibrary({
         tweets: repos.tweets,
         cacheRoot: deps.config.cacheRoot,
         fetcher: mediaFetcher,
         fetchImpl,
         fxBaseUrl: deps.config.fxTwitterBaseUrl,
         maxBytes: deps.config.mediaExportMaxMb * 1024 * 1024,
-        groupFileMaxBytes: deps.config.maxGroupFileMb * 1024 * 1024,
       })
-    : new StubMediaExportService();
+    : new StubMediaLibrary();
   const newTweetProcessor = new DefaultNewTweetProcessor({
     tweets: repos.tweets,
     workflow,
@@ -177,8 +162,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
           workflow,
           imageUploader: deps.bilibili.imageUploader,
           dynamicPublisher: deps.bilibili.dynamicPublisher,
-          fetchImpl,
-          fetcher: mediaFetcher,
+          media,
         })
       : new StubPublishService());
 
@@ -193,7 +177,6 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     sourceValidation,
     screenshot,
     media,
-    mediaExport,
     newTweetProcessor,
   };
 }
@@ -211,7 +194,6 @@ export type {
   NewTweetProcessor,
   SourceValidationService,
   ScreenshotService,
-  MediaService,
-  MediaExportService,
+  MediaLibrary,
   PublishService,
 };

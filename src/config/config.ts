@@ -64,6 +64,9 @@ export interface AppConfig {
   /** 媒体导出单文件大小上限（MB，!媒体 指令）。 */
   mediaExportMaxMb: number;
 
+  /** 媒体缓存保留天数（超期自动清理；推文截图不受影响）。 */
+  mediaCacheTtlDays: number;
+
   /** QQ 群文件大小上限（MB，超过则不导出并提示）。 */
   maxGroupFileMb: number;
 
@@ -136,6 +139,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     publishMode,
     fxTwitterBaseUrl: (env.FX_TWITTER_BASE_URL ?? 'https://api.fxtwitter.com/2').replace(/\/+$/, ''),
     mediaExportMaxMb: parseIntStrict(env.MEDIA_EXPORT_MAX_MB, 300, 'MEDIA_EXPORT_MAX_MB'),
+    mediaCacheTtlDays: parseIntStrict(env.MEDIA_CACHE_TTL_DAYS, 7, 'MEDIA_CACHE_TTL_DAYS'),
     maxGroupFileMb: parseIntStrict(env.MAX_GROUP_FILE_MB, 100, 'MAX_GROUP_FILE_MB'),
     apiPort: parseIntStrict(env.API_PORT, 18080, 'API_PORT'),
     apiToken: env.API_TOKEN ?? '',
