@@ -1,8 +1,8 @@
-"""QQ 群命令插件：!监听 !列表 !查看 !翻译 !发布 !重试 !刷新。
+"""QQ 群命令插件：!监听 !列表 !查看 !翻译 !话题 !媒体 !发布 !重试 !刷新。
 
 多账号模型：
 - 每个监听账号拥有独立的推文编号（seq），命令中的编号指账号内编号；
-- 未指定账号的命令（列表/查看/翻译/发布/刷新）作用于默认账号；
+- 未指定账号的命令（列表/查看/翻译/媒体/发布/刷新）作用于默认账号；
 - !监听 默认 @账号 可切换默认账号。
 """
 from nonebot import on_command
@@ -19,6 +19,7 @@ topic = on_command("话题", priority=1)
 publish = on_command("发布", priority=1)
 retry = on_command("重试", priority=1)
 refresh = on_command("刷新", priority=1)
+media = on_command("媒体", priority=1)
 
 PENDING_LABELS = {"pending": "待翻译", "translated": "已翻译", "published": "已发布", "failed": "失败", "all": "全部"}
 
@@ -63,6 +64,14 @@ def pick_account(parts: list[str]) -> str | None:
         if p.startswith("@"):
             return p.lstrip("@").strip()
     return None
+
+
+def human_size(size: int) -> str:
+    if size >= 1024 * 1024:
+        return f"{size / 1024 / 1024:.1f} MB"
+    if size >= 1024:
+        return f"{size / 1024:.0f} KB"
+    return f"{size} B"
 
 
 async def precheck(event: GroupMessageEvent) -> bool:
@@ -392,4 +401,53 @@ async def handle_refresh(bot: Bot, event: GroupMessageEvent, args: Message = Com
             lines.append(
                 f"@{r['screenName']} 刷新完成：读取 {r['timelineCount']} 条，新增 {len(r['newTweets'])} 条（{mode}）"
             )
+    await bot.send(event, "\n".join(lines))
+
+
+@media.handle()
+async def handle_media(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
+    """!媒体 <编号> [@账号]：下载推文原图/视频（最高画质）并上传到本群群文件。"""
+    if await precheck(event):
+        return
+    parts = args.extract_plain_text().strip().split()
+    if not parts or not parts[0].isdigit():
+        await bot.send(event, "用法：!媒体 <编号> [@账号]")
+        return
+    seq = parts[0]
+    account = pick_account(parts[1:])
+    tweet, data = await resolve_tweet(event, seq, account)
+    if tweet is None:
+        await bot.send(event, error_text(data))
+        return
+    data = await call_api(f"/api/tweets/{tweet['id']}/media", "POST", event=event)
+    if not data.get("ok"):
+        await bot.send(event, error_text(data))
+        return
+    payload = data["data"]
+    files = payload.get("files") or []
+    skipped = payload.get("skipped") or []
+    title = f"@{tweet['authorScreenName']} #{seq}"
+    if not files and not skipped:
+        await bot.send(event, f"{title} 该推文没有可下载的媒体")
+        return
+
+    uploaded: list[str] = []
+    failed: list[str] = []
+    for item in files:
+        try:
+            await bot.call_api(
+                "upload_group_file",
+                group_id=int(event.group_id),
+                file=item["path"],
+                name=item["name"],
+            )
+            uploaded.append(f"✔ {item['name']}（{human_size(int(item.get('bytes') or 0))}）")
+        except Exception as exc:  # noqa: BLE001 - 单个文件失败不影响其余
+            failed.append(f"{item['name']}：{exc}")
+
+    lines = [f"{title} 媒体已上传到群文件：", *uploaded] if uploaded else [f"{title} 媒体上传失败"]
+    if failed:
+        lines.append("上传失败：" + "；".join(failed))
+    for item in skipped:
+        lines.append(f"跳过 {item['name']}：{item['reason']}")
     await bot.send(event, "\n".join(lines))

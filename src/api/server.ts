@@ -399,6 +399,22 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         return;
       }
 
+      // ---- 媒体导出（!媒体：原图 + 最高码率视频，供 QQ 群文件上传；成员）----
+      const mediaMatch = /^\/api\/tweets\/(\d+)\/media$/.exec(pathname);
+      if (mediaMatch && method === 'POST') {
+        authorize(req, 'member');
+        const result = await services.mediaExport.exportMedia(Number(mediaMatch[1]));
+        ok(res, {
+          files: result.files.map((file) => ({
+            ...file,
+            // QQ 侧（NapCat）在宿主机读取文件，这里返回绝对路径
+            path: resolveMediaPath(file.path, config.cacheRoot),
+          })),
+          skipped: result.skipped,
+        });
+        return;
+      }
+
       // ---- 重试（§39，管理员）----
       const retryMatch = /^\/api\/tweets\/(\d+)\/retry$/.exec(pathname);
       if (retryMatch && method === 'POST') {

@@ -58,6 +58,15 @@ export interface AppConfig {
   /** 发布模式：MVP 仅 manual。 */
   publishMode: 'manual';
 
+  /** FxTwitter API 根地址（!媒体 指令取原始视频地址用）。 */
+  fxTwitterBaseUrl: string;
+
+  /** 媒体导出单文件大小上限（MB，!媒体 指令）。 */
+  mediaExportMaxMb: number;
+
+  /** QQ 群文件大小上限（MB，超过则不导出并提示）。 */
+  maxGroupFileMb: number;
+
   /** 内部 HTTP API 监听端口（NoneBot2 / 未来 Web 调用）。 */
   apiPort: number;
 
@@ -125,6 +134,9 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliCookieString: env.BILI_COOKIE_STRING ?? '',
     biliCookieFile: env.BILI_COOKIE_FILE ?? path.join(path.dirname(path.resolve(env.DATABASE_PATH ?? './data/app.db')), 'bili-cookies.json'),
     publishMode,
+    fxTwitterBaseUrl: (env.FX_TWITTER_BASE_URL ?? 'https://api.fxtwitter.com/2').replace(/\/+$/, ''),
+    mediaExportMaxMb: parseIntStrict(env.MEDIA_EXPORT_MAX_MB, 300, 'MEDIA_EXPORT_MAX_MB'),
+    maxGroupFileMb: parseIntStrict(env.MAX_GROUP_FILE_MB, 100, 'MAX_GROUP_FILE_MB'),
     apiPort: parseIntStrict(env.API_PORT, 18080, 'API_PORT'),
     apiToken: env.API_TOKEN ?? '',
   };

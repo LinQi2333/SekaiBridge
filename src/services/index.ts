@@ -33,6 +33,11 @@ import {
 } from './screenshot-service.js';
 import { DefaultMediaService, StubMediaService, type MediaService } from './media-service.js';
 import {
+  DefaultMediaExportService,
+  StubMediaExportService,
+  type MediaExportService,
+} from './media-export-service.js';
+import {
   DefaultNewTweetProcessor,
   type NewTweetProcessor,
 } from './tweet-processor.js';
@@ -59,6 +64,8 @@ export interface AppServices {
   sourceValidation: SourceValidationService;
   screenshot: ScreenshotService;
   media: MediaService;
+  /** 推文媒体导出（!媒体 指令：原图 + 最高码率视频）。 */
+  mediaExport: MediaExportService;
   newTweetProcessor: NewTweetProcessor;
 }
 
@@ -123,6 +130,17 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
         fetcher: mediaFetcher,
       })
     : new StubMediaService();
+  const mediaExport: MediaExportService = deps
+    ? new DefaultMediaExportService({
+        tweets: repos.tweets,
+        cacheRoot: deps.config.cacheRoot,
+        fetcher: mediaFetcher,
+        fetchImpl,
+        fxBaseUrl: deps.config.fxTwitterBaseUrl,
+        maxBytes: deps.config.mediaExportMaxMb * 1024 * 1024,
+        groupFileMaxBytes: deps.config.maxGroupFileMb * 1024 * 1024,
+      })
+    : new StubMediaExportService();
   const newTweetProcessor = new DefaultNewTweetProcessor({
     tweets: repos.tweets,
     workflow,
@@ -175,6 +193,7 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
     sourceValidation,
     screenshot,
     media,
+    mediaExport,
     newTweetProcessor,
   };
 }
@@ -193,5 +212,6 @@ export type {
   SourceValidationService,
   ScreenshotService,
   MediaService,
+  MediaExportService,
   PublishService,
 };
