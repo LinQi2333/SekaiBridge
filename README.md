@@ -120,6 +120,22 @@ docker compose restart app
 docker compose logs -f app | grep -i bilibili
 ```
 
+**凭据优先级（重要）**
+
+```
+/app/data/bili-cookies.json（扫码工具与自动续期写入）
+   > BILI_COOKIE_STRING（.env，首次登录的原始串）
+      > BILI_SESSDATA + BILI_JCT + BILI_DEDEUSERID（.env，最老三件套）
+```
+
+- 文件存在且有效时，`.env` 里的 Cookie 一律被忽略；用 `BILI_COOKIE_STRING` 时请注意：
+  **改完 `.env` 必须同时删掉 cookie 文件**（`docker compose exec app rm -f /app/data/bili-cookies.json`），否则新值不生效
+- **推荐做法**：只用 cookie 文件（扫码工具维护），把 `.env` 里的
+  `BILI_COOKIE_STRING` / `BILI_REFRESH_TOKEN` / `BILI_SESSDATA` / `BILI_JCT` / `BILI_DEDEUSERID` 全部留空。
+  尤其 `BILI_JCT` 建议务必留空：`csrf` 参数会优先取 Cookie 串里的 `bili_jct`（与 Cookie 头同源），
+  如果 `.env` 里留着一份旧的 `bili_jct`，自动续期轮换后两套凭据会不一致，容易出现 `-111 csrf 校验失败`
+- cookie 文件丢失时（换机器/清卷）app 会明确报"未配置 Cookie"，重跑一次扫码工具即可
+
 主程序每 6 小时做一次会话体检与自动续期（B 站 Web 端同款机制）：
 
 - **`bili_ticket`**：始终自动续期（有效期 3 天），新值写回 Cookie 文件

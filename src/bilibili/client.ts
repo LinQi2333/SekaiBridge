@@ -388,13 +388,18 @@ export class BilibiliClient {
     return { ok: true, payload, response };
   }
 
-  /** csrf token：优先 cookie.jct，否则从完整 Cookie 串解析 bili_jct=。 */
+  /**
+   * csrf token：**优先 Cookie 串里的 `bili_jct`**（与 Cookie 头同源），
+   * 只在 Cookie 串缺失时才回退到 env 三件套。
+   * 顺序不能反：SESSDATA 自动续期会轮换 `bili_jct`，若 csrf 取自另一份凭据，
+   * 就会出现「Cookie 头是新值、csrf 是旧值」→ B 站 -111 csrf 校验失败。
+   */
   #jct(): string {
-    if (this.cookie.jct) {
-      return this.cookie.jct;
+    const fromCookieString = this.cookieString ? cookieValue(this.cookieString, 'bili_jct') : null;
+    if (fromCookieString) {
+      return fromCookieString;
     }
-    const match = /(?:^|;\s*)bili_jct=([^;]+)/.exec(this.cookieString);
-    return match?.[1] ?? '';
+    return this.cookie.jct ?? '';
   }
 
   #cookieHeader(): string {
