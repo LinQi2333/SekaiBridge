@@ -157,7 +157,8 @@ export class BilibiliClient {
 
   constructor(options: BilibiliClientOptions) {
     this.cookie = options.cookie;
-    this.cookieFile = options.cookieFile ?? null;
+    // 空串等同于"未配置"：否则会静默跳过 cookie 文件的读写
+    this.cookieFile = options.cookieFile?.trim() || null;
     // 优先读取持久化文件（续期结果跨重启保留），否则用 env 初值
     const fromFile = this.#loadCookieFromFile();
     this.cookieString = fromFile?.cookieString ?? options.cookieString ?? '';

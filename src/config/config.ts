@@ -141,7 +141,14 @@ export function loadConfig(env: Env = process.env): AppConfig {
     biliDedeuserid: env.BILI_DEDEUSERID ?? '',
     biliCookieString: env.BILI_COOKIE_STRING ?? '',
     biliRefreshToken: env.BILI_REFRESH_TOKEN ?? '',
-    biliCookieFile: env.BILI_COOKIE_FILE ?? path.join(path.dirname(path.resolve(env.DATABASE_PATH ?? './data/app.db')), 'bili-cookies.json'),
+    // 注意用 ||（而不是 ??）：compose 会把未设置的变量传成空串，
+    // 空串必须回退到默认路径，否则 cookie 文件读写会被静默禁用
+    biliCookieFile:
+      env.BILI_COOKIE_FILE?.trim() ||
+      path.join(
+        path.dirname(path.resolve(env.DATABASE_PATH?.trim() || './data/app.db')),
+        'bili-cookies.json',
+      ),
     publishMode,
     fxTwitterBaseUrl: (env.FX_TWITTER_BASE_URL ?? 'https://api.fxtwitter.com/2').replace(/\/+$/, ''),
     mediaExportMaxMb: parseIntStrict(env.MEDIA_EXPORT_MAX_MB, 300, 'MEDIA_EXPORT_MAX_MB'),
