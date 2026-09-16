@@ -95,7 +95,8 @@ docker compose logs -f app | grep -i bilibili
 - 扫码成功后工具会核对账号昵称，并把新 Cookie **直接写进 app 的数据卷**
   （`/app/data/bili-cookies.json`），所以**不用改 `.env`**；同时也会打印两行 `.env` 片段
   （建议顺手更新 `.env` 作为兜底：app 读文件优先，文件丢了才会回退 `.env`）
-- 不想要网页时：`docker compose --profile tools run --rm --service-ports bili-login --no-serve`
+- 不想要网页时（只打印终端二维码与 PNG）：把命令末尾换成完整脚本调用
+  `docker compose --profile tools run --rm --service-ports bili-login node scripts/bili-login.mjs --no-serve`
 
 **方式二（本机版）**：没有 Docker 环境时可在本地电脑跑同一脚本，再把结果填进服务器 `.env`：
 
