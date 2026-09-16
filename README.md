@@ -154,7 +154,8 @@ docker compose logs -f app | grep -i bilibili
 
 - 编号为**账号内独立编号**；未指定账号的命令作用于默认账号
 - 新推文入库即自动下载原图（最高画质）并在后台缓存，通知群时只发文本 + 推文截图
-- `/媒体` 复用同一批缓存文件上传群文件（图片 `photo<n>.jpg|png`、视频 `video<n>.mp4`）；
+- `/媒体` **本地优先**：`cache/media/<推文ID>/` 里已经有文件就直接读本地（不联网、秒回）；
+  缺失或之前下载失败过才去下载补齐。上传群文件时图片叫 `photo<n>.jpg|png`、视频叫 `video<n>.mp4`；
   超过 `MAX_GROUP_FILE_MB` 或下载失败的文件会单独列出跳过原因
 
 ---
@@ -173,7 +174,8 @@ docker compose logs -f app | grep -i bilibili
 - **数据**：数据库在 volume `app-data`（`/app/data/app.db`）；缓存在 `cache/`（与宿主机同路径挂载，NapCat 直接按绝对路径读取）
 - **缓存目录**：
   - `cache/screenshots/<推文ID>.png`：推文截图，**永久保留**（数据库会引用，请勿手动删除）
-  - `cache/media/<推文ID>/`：推文原图与视频，`photo<n>.<ext>` / `video<n>.<ext>`；新推文入库即自动下载，发布与 `/媒体` 直接读取本地文件，不再重复下载
+  - `cache/media/<推文ID>/`：推文原图与视频，`photo<n>.<ext>` / `video<n>.<ext>`；新推文入库即自动下载，
+    发布与 `/媒体` **本地优先**（已下载就直接读文件，缺失才下载补齐），不会重复下载
   - 媒体按 `MEDIA_CACHE_TTL_DAYS`（默认 7 天）由后台每 6 小时清理一次；如需彻底清空可整个删除 `cache/media/`（下次自动重新下载）
   - 旧版本遗留的 `cache/twitter-photos/`、`cache/video-thumbnails/`、`cache/exports/` 目录已废弃，可直接删除
 - **发布失败**：`/发布` 返回 `BILIBILI_AUTH` → Cookie 失效 → 重新复制 `BILI_COOKIE_STRING`（连同

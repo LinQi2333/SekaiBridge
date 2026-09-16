@@ -30,16 +30,20 @@ export interface CacheMediaResult {
 /**
  * 推文媒体库：统一管理 cache/media/<推文ID>/ 下的图片与视频。
  * - 新推文入库时即下载（图片 `name=orig` 最高画质；视频取最高码率 mp4）
+ * - `ensureMedia` 是"本地优先"入口：本地已下载齐 → 直接读本地（不联网）；
+ *   未下载或不完整 → 才执行下载
  * - 发布会话直接读取本地文件，不再重复下载
  * - `!媒体` 指令复用同一批文件上传群文件
  * - `cleanupOlderThan` 负责按天清理（截图不受影响）
  */
 export interface MediaLibrary {
-  /** 下载并缓存该推文媒体（已存在的文件跳过）。 */
+  /** 下载并缓存该推文媒体（已存在的文件跳过；会联网，用于补齐）。 */
   cacheMedia(tweetId: number): Promise<CacheMediaResult>;
+  /** 本地优先：已下载齐直接返回本地文件，未下载/不完整才下载。 */
+  ensureMedia(tweetId: number): Promise<CacheMediaResult>;
   /** 列出已缓存的媒体文件（按类型/序号排序）。 */
   listMedia(tweetId: number): Promise<StoredMedia[]>;
-  /** 取图片文件；一个都没有时先下载再返回（发布用）。 */
+  /** 取图片文件：本地已齐直接用；缺失则补齐（发布用）。 */
   ensurePhotos(tweetId: number): Promise<StoredMedia[]>;
   /** 清理超过天数的媒体文件与空目录，返回清理数量。 */
   cleanupOlderThan(days: number): Promise<{ files: number; dirs: number }>;
@@ -133,6 +137,21 @@ export class DefaultMediaLibrary implements MediaLibrary {
     return { files: sortMedia(files), skipped };
   }
 
+  /**
+   * 本地优先入口（`!媒体` 用）：
+   * - 本地已下载齐（数量达到库内记录的张数）→ 直接返回本地文件，完全不联网
+   * - 本地没有 / 不完整（含之前下载失败的）→ 才走 cacheMedia 补齐
+   */
+  async ensureMedia(tweetId: number): Promise<CacheMediaResult> {
+    const tweet = this.#requireTweet(tweetId);
+    const local = await this.listMedia(tweetId);
+    if (isComplete(local, expectedMediaCounts(tweet))) {
+      log('media.cache.reuse', `#${tweetId} 使用本地已有 ${local.length} 个文件（不下载）`);
+      return { files: local, skipped: [] };
+    }
+    return this.cacheMedia(tweetId);
+  }
+
   async listMedia(tweetId: number): Promise<StoredMedia[]> {
     const dir = tweetMediaDir(this.cacheRoot, tweetId);
     let names: string[];
@@ -163,8 +182,10 @@ export class DefaultMediaLibrary implements MediaLibrary {
   }
 
   async ensurePhotos(tweetId: number): Promise<StoredMedia[]> {
+    const tweet = this.#requireTweet(tweetId);
     const photos = (await this.listMedia(tweetId)).filter((file) => file.kind === 'photo');
-    if (photos.length > 0) {
+    // 本地图片已齐（数量不少于库内记录的图片数）→ 直接用，不联网
+    if (photos.length > 0 && photos.length >= expectedMediaCounts(tweet).photo) {
       return photos;
     }
     const result = await this.cacheMedia(tweetId);
@@ -296,6 +317,28 @@ export class DefaultMediaLibrary implements MediaLibrary {
   }
 }
 
+/**
+ * 从库内 mediaJson 统计该推文应有的媒体数量（纯离线，不联网）。
+ * 用于判断本地缓存是否已经"下载齐"。
+ */
+export function expectedMediaCounts(tweet: Tweet): { photo: number; video: number } {
+  const media = parseMedia(tweet.mediaJson);
+  return {
+    photo: media.filter((item) => item.type === 'photo' && typeof item.url === 'string').length,
+    video: media.filter((item) => item.type === 'video').length,
+  };
+}
+
+/** 本地文件数量是否已达到库内记录（>= 期望张数即视为已下载）。 */
+function isComplete(files: StoredMedia[], expected: { photo: number; video: number }): boolean {
+  if (files.length === 0) {
+    return false;
+  }
+  const photo = files.filter((file) => file.kind === 'photo').length;
+  const video = files.filter((file) => file.kind === 'video').length;
+  return photo >= expected.photo && video >= expected.video;
+}
+
 /** 从 mp4 变体里挑码率最高的一条。 */
 export function bestMp4(
   formats: { url?: string; container?: string; bitrate?: number }[],
@@ -310,7 +353,6 @@ export function bestMp4(
     mp4s.reduce((best, cur) => ((cur.bitrate ?? 0) > (best.bitrate ?? 0) ? cur : best)).url ?? null
   );
 }
-
 /** Twitter 图片取原始格式的最高画质（去掉 format= 转换参数）。 */
 export function originalQualityUrl(url: string): string {
   try {
@@ -345,6 +387,10 @@ function mb(bytes: number): number {
 
 export class StubMediaLibrary implements MediaLibrary {
   cacheMedia(_tweetId: number): Promise<CacheMediaResult> {
+    throw new NotImplementedError('MediaLibrary 未接线');
+  }
+
+  ensureMedia(_tweetId: number): Promise<CacheMediaResult> {
     throw new NotImplementedError('MediaLibrary 未接线');
   }
 

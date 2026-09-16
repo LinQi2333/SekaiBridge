@@ -399,11 +399,11 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         return;
       }
 
-      // ---- 媒体缓存（!媒体：原图 + 最高码率视频，供 QQ 群文件上传；成员）----
+      // ---- 媒体（!媒体：本地已下载直接读文件，未下载才下载；成员）----
       const mediaMatch = /^\/api\/tweets\/(\d+)\/media$/.exec(pathname);
       if (mediaMatch && method === 'POST') {
         authorize(req, 'member');
-        const result = await services.media.cacheMedia(Number(mediaMatch[1]));
+        const result = await services.media.ensureMedia(Number(mediaMatch[1]));
         const limitBytes = config.maxGroupFileMb * 1024 * 1024;
         const skipped = [...result.skipped];
         const files: { kind: string; name: string; bytes: number; path: string | null }[] = [];
