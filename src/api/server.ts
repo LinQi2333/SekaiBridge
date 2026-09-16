@@ -403,18 +403,26 @@ export function createApiServer(options: ApiServerOptions): http.Server {
       const mediaMatch = /^\/api\/tweets\/(\d+)\/media$/.exec(pathname);
       if (mediaMatch && method === 'POST') {
         authorize(req, 'member');
-        const result = await services.media.ensureMedia(Number(mediaMatch[1]));
+        const tweetId = Number(mediaMatch[1]);
+        const result = await services.media.ensureMedia(tweetId);
+        // 群文件是扁平命名空间：文件名统一带账号内编号前缀，避免不同推文同名混淆
+        // （磁盘上仍是 photo1.jpg，各自在自己的 cache/media/<推文ID>/ 目录里）
+        const tweet = services.tweetQuery.getById(tweetId);
+        const prefix = `${tweet.seq}_`;
         const limitBytes = config.maxGroupFileMb * 1024 * 1024;
-        const skipped = [...result.skipped];
+        const skipped = result.skipped.map((item) => ({ ...item, name: `${prefix}${item.name}` }));
         const files: { kind: string; name: string; bytes: number; path: string | null }[] = [];
         for (const file of result.files) {
           if (file.bytes > limitBytes) {
-            skipped.push({ name: file.name, reason: `超过群文件上限 ${config.maxGroupFileMb}MB` });
+            skipped.push({
+              name: `${prefix}${file.name}`,
+              reason: `超过群文件上限 ${config.maxGroupFileMb}MB`,
+            });
             continue;
           }
           files.push({
             kind: file.kind,
-            name: file.name,
+            name: `${prefix}${file.name}`,
             bytes: file.bytes,
             // QQ 侧（NapCat）在宿主机读取文件，这里返回绝对路径
             path: resolveMediaPath(file.absPath, config.cacheRoot),
