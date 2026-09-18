@@ -15,14 +15,39 @@ _task: asyncio.Task | None = None
 POLL_INTERVAL = 2.0  # 拉取间隔（秒）
 
 
+async def _send_original_text(bot: Bot, notification: dict, group_id: int) -> None:
+    """截图发完后，用「合并转发」把推文原文单独推一条（失败只记日志，不影响通知）。"""
+    original = (notification.get("originalText") or "").strip()
+    if not original:
+        return
+    author = notification.get("authorScreenName") or ""
+    seq = notification.get("seq")
+    title = f"@{author} #{seq}" if author else "推文原文"
+    if notification.get("tweetUrl"):
+        original = f"{original}\n\n{notification['tweetUrl']}"
+    node = {
+        "type": "node",
+        "data": {
+            "name": title,
+            "uin": str(bot.self_id),
+            "content": [{"type": "text", "data": {"text": original}}],
+        },
+    }
+    try:
+        await bot.call_api("send_group_forward_msg", group_id=group_id, messages=[node])
+    except Exception:
+        logger.exception("原文合并转发失败 id=%s", notification.get("id"))
+
+
 async def _send_notification(bot: Bot, notification: dict) -> None:
-    """发送一条通知：文本 + 推文截图（不再发送视频封面）。"""
+    """发送一条通知：文本 + 推文截图，随后以合并转发补一条推文原文。"""
     segments: list = [MessageSegment.text(notification["text"])]
     if notification.get("screenshotPath"):
         segments.append(MessageSegment.image(file_uri(notification["screenshotPath"])))
     # 支持逗号分隔多个群：取第一个（TQB_NOTIFY_GROUP 可能与 QQ_GROUP_IDS 同源）
     group_id = int(config.tqb_notify_group.split(",")[0].strip())
     await bot.send_group_msg(group_id=group_id, message=segments)
+    await _send_original_text(bot, notification, group_id)
 
 
 async def _poll_loop(bot: Bot) -> None:

@@ -445,10 +445,22 @@ export function createApiServer(options: ApiServerOptions): http.Server {
         checkToken(req);
         const limit = Math.min(100, Math.max(1, Number.parseInt(q.get('limit') ?? '20', 10)));
         const pending = notifications.listPending(limit);
-        for (const n of pending) {
-          resolveNotificationMediaPaths(n as unknown as Record<string, unknown>, config.cacheRoot);
-        }
-        ok(res, { notifications: pending });
+        // 附带推文原文等信息：截图发完后，QQ 侧会以「合并转发」把原文单独推一条
+        const tweets = services.tweetQuery.getManyByIds(pending.map((n) => n.tweetId)).tweets;
+        const tweetById = new Map(tweets.map((t) => [t.id, t]));
+        const payload = pending.map((n) => {
+          const record = n as unknown as Record<string, unknown>;
+          resolveNotificationMediaPaths(record, config.cacheRoot);
+          const tweet = tweetById.get(n.tweetId);
+          return {
+            ...record,
+            seq: tweet?.seq ?? null,
+            authorScreenName: tweet?.authorScreenName ?? null,
+            originalText: tweet?.originalText ?? '',
+            tweetUrl: tweet?.tweetUrl ?? null,
+          };
+        });
+        ok(res, { notifications: payload });
         return;
       }
       const ackMatch = /^\/api\/notifications\/(\d+)\/ack$/.exec(pathname);
