@@ -10,6 +10,7 @@ from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, Message
 from nonebot.params import CommandArg
 
 from .api import call_api, dedupe_message, error_text, file_uri
+from .forward import send_original_texts
 
 watch = on_command("监听", priority=1)
 tweet_list = on_command("列表", priority=1)
@@ -233,6 +234,7 @@ async def handle_show(bot: Bot, event: GroupMessageEvent, args: Message = Comman
     if not seqs:
         await bot.send(event, "用法：!查看 <编号> [@账号]\n例：!查看 3 | !查看 3,5 @pj_sekai")
         return
+    originals: list[dict] = []
     for seq in seqs:
         tweet, data = await resolve_tweet(event, seq, account)
         if tweet is None:
@@ -253,6 +255,23 @@ async def handle_show(bot: Bot, event: GroupMessageEvent, args: Message = Comman
         else:
             text += "\n\n（该推文暂无截图：历史/待处理推文，新推文会自动生成截图）"
             await bot.send(event, text)
+        originals.append(
+            {
+                "text": tweet.get("originalText"),
+                "author": tweet.get("authorScreenName"),
+                "seq": tweet.get("seq"),
+                "url": tweet.get("tweetUrl"),
+            }
+        )
+
+    # 状态与截图发完后，用合并转发补推文原文（多条编号合并成一张聊天记录卡片）
+    if originals:
+        await send_original_texts(
+            bot,
+            int(event.group_id),
+            originals,
+            source=f"查看{','.join(seqs)}",
+        )
 
 
 @translate.handle()
