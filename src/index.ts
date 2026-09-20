@@ -77,7 +77,7 @@ function main(): void {
             console.log(`[bilibili] SESSDATA 已自动续期${until}（新 Cookie 与刷新口令已写回文件）`);
           } else {
             console.error(
-              `[bilibili] ⚠️ SESSDATA 自动续期失败：${refresh.reason}。请重新扫码登录：${BILI_LOGIN_HINT}`,
+              `[bilibili] ⚠️ SESSDATA 自动续期未完成：${refresh.reason}。若随后出现"会话已失效"，再重新扫码登录：${BILI_LOGIN_HINT}`,
             );
           }
         }

@@ -121,6 +121,52 @@ export function cookieValue(cookieString: string, name: string): string | null {
 }
 
 /**
+ * 在 Cookie 串上批量替换/追加 name=value，返回**新串**（不改原串）。
+ * 用函数式替换：避免值里出现 `$&`/`$'` 这类字符被当成替换模式。
+ */
+export function withCookiePairs(
+  base: string,
+  cookies: Record<string, string>,
+  names: string[],
+): string {
+  let result = base;
+  for (const name of names) {
+    const value = cookies[name];
+    if (!value) continue;
+    const pattern = new RegExp(`(?:^|;\\s*)${name}=[^;]*`);
+    if (pattern.test(result)) {
+      result = result.replace(pattern, () => `${name}=${value}`);
+    } else {
+      const trimmed = result.trim();
+      result = trimmed.length > 0 ? `${trimmed}; ${name}=${value}` : `${name}=${value}`;
+    }
+  }
+  return result;
+}
+
+/** 日志用：打印 B 站响应，敏感字段（token/cookie 类）只留长度。 */
+export function redactPayload(payload: unknown): string {
+  if (payload === undefined || payload === null) {
+    return '';
+  }
+  const sensitive = /(refresh_token|sessdata|bili_jct|cookie|ticket|token)/i;
+  const walk = (value: unknown): unknown => {
+    if (Array.isArray(value)) {
+      return value.map(walk);
+    }
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+        out[key] = sensitive.test(key) ? `<redacted len=${String(item ?? '').length}>` : walk(item);
+      }
+      return out;
+    }
+    return value;
+  };
+  return JSON.stringify(walk(payload));
+}
+
+/**
  * Bilibili 客户端（规格 §36 / §40）。
  * 封装 wbi 签名、Cookie 认证、统一错误处理。
  * 测试通过注入 fetchImpl 完全隔离真实网络。
@@ -331,13 +377,14 @@ export class BilibiliClient {
 
   /**
    * 宽松请求：网络/业务错误都不抛异常，返回结果对象（供自动续期流程使用，
-   * 失败时只降级为日志，不影响主业务）。
+   * 失败时只降级为日志，不影响主业务）。失败时一并带回原始 payload，便于定位 -400 之类。
    */
   async #softJson(
     url: string,
     init: RequestInit = {},
   ): Promise<
-    { ok: true; payload: BiliResponse; response: Response } | { ok: false; error: string; code?: number }
+    | { ok: true; payload: BiliResponse; response: Response }
+    | { ok: false; error: string; code?: number; payload?: unknown; status?: number }
   > {
     let response: Response;
     try {
@@ -346,7 +393,13 @@ export class BilibiliClient {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
     if (!response.ok) {
-      return { ok: false, error: `HTTP ${response.status}` };
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        body = undefined;
+      }
+      return { ok: false, error: `HTTP ${response.status}`, status: response.status, payload: body };
     }
     let payload: BiliResponse;
     try {
@@ -355,7 +408,12 @@ export class BilibiliClient {
       return { ok: false, error: '返回了无效 JSON' };
     }
     if (payload.code !== 0) {
-      return { ok: false, error: payload.message || `code=${payload.code}`, code: payload.code };
+      return {
+        ok: false,
+        error: payload.message || `code=${payload.code}`,
+        code: payload.code,
+        payload,
+      };
     }
     return { ok: true, payload, response };
   }
@@ -436,7 +494,8 @@ export class BilibiliClient {
   #assignCookiePair(name: string, value: string): void {
     const pattern = new RegExp(`(?:^|;\\s*)${name}=[^;]*`);
     if (pattern.test(this.cookieString)) {
-      this.cookieString = this.cookieString.replace(pattern, `${name}=${value}`);
+      // 函数式替换：值里的 $& / $' 不会被当成替换模式
+      this.cookieString = this.cookieString.replace(pattern, () => `${name}=${value}`);
     } else {
       const base = this.cookieString.trim();
       this.cookieString = base.length > 0 ? `${base}; ${name}=${value}` : `${name}=${value}`;
@@ -452,9 +511,12 @@ export class BilibiliClient {
 
   /**
    * 按 B 站 Web 端流程续期 SESSDATA：
-   * cookie/info（是否需要刷新）→ CorrespondPath → refresh_csrf → cookie/refresh → confirm/refresh。
-   * 成功后新 Cookie 与轮换后的 refresh_token 一起写回 cookie 文件。
-   * 失败只返回原因（不抛异常），由调用方决定是否告警。
+   * cookie/info（是否需要刷新）→ CorrespondPath → refresh_csrf → cookie/refresh
+   * → **nav 自检** → SSO 跨域 → confirm/refresh → 落盘。
+   *
+   * 关键安全点：新 Cookie **先自检再落盘**。B 站的刷新是一整套流程，
+   * 半途失败（历史故障：confirm 400）时新 Cookie 可能不可用，
+   * 若直接覆盖旧值就会把还能用的会话换成"未登录"。自检不通过时保留旧值并立刻告警。
    */
   async refreshLoginCookie(): Promise<CookieRefreshResult> {
     if (!this.hasCookie()) {
@@ -489,7 +551,7 @@ export class BilibiliClient {
       return { refreshed: false, reason: '获取 refresh_csrf 失败（CorrespondPath 失效或被风控）' };
     }
 
-    // 3) 刷新 Cookie（响应 set-cookie 里是新的 SESSDATA/bili_jct 等）
+    // 3) 刷新 Cookie（响应 set-cookie 里是新的 SESSDATA/bili_jct 等），先只在内存里组装
     const refreshed = await this.#softJson(COOKIE_REFRESH_URL, {
       method: 'POST',
       headers: {
@@ -510,6 +572,9 @@ export class BilibiliClient {
         this.refreshToken = null;
         this.#saveCookieFile();
       }
+      console.error(
+        `[bilibili] cookie/refresh 失败：${refreshed.error}${refreshed.code ? `（code=${refreshed.code}）` : ''} ${redactPayload(refreshed.payload)}`,
+      );
       return {
         refreshed: false,
         reason: `cookie/refresh 失败: ${refreshed.error}${refreshed.code ? `（code=${refreshed.code}）` : ''}`,
@@ -520,20 +585,42 @@ export class BilibiliClient {
     const cookies = parseSetCookies(setCookieHeaders);
     const sessdataHeader = setCookieHeaders.find((h) => /^SESSDATA=/i.test(h.trim()));
     const newJct = cookies['bili_jct'] ?? this.#jct();
-    for (const name of REFRESHED_COOKIE_NAMES) {
-      const value = cookies[name];
-      if (value) {
-        this.#assignCookiePair(name, value);
+    const ssoUrl = (refreshed.payload.data as { url?: string } | undefined)?.url ?? null;
+    const newRefreshToken =
+      (refreshed.payload.data as { refresh_token?: string } | undefined)?.refresh_token ?? null;
+
+    // 4) 自检：用「新 Cookie」调 nav，isLogin 不为 true 就整体回滚（不落盘）
+    const previousCookieString = this.cookieString;
+    const previousRefreshToken = this.refreshToken;
+    const candidate = withCookiePairs(previousCookieString, cookies, REFRESHED_COOKIE_NAMES);
+    this.cookieString = candidate;
+    const check = await this.#softJson(NAV_URL);
+    const loggedIn =
+      check.ok && (check.payload.data as { isLogin?: boolean } | undefined)?.isLogin === true;
+    if (!loggedIn) {
+      this.cookieString = previousCookieString;
+      this.refreshToken = previousRefreshToken;
+      const detail = check.ok
+        ? 'nav 返回 isLogin=false'
+        : `nav 请求失败: ${check.error}${check.code ? `（code=${check.code}）` : ''}`;
+      console.error(
+        `[bilibili] ⚠️ 续期后的新 Cookie 自检未通过（${detail}），已回滚为旧 Cookie 且未落盘`,
+      );
+      return {
+        refreshed: false,
+        reason: `新 Cookie 自检未通过（${detail}），已保留旧 Cookie`,
+      };
+    }
+
+    // 5) SSO 跨域登录（官方流程最后一步；失败只记日志，不影响主站会话）
+    if (ssoUrl) {
+      const sso = await this.#softJson(ssoUrl);
+      if (!sso.ok) {
+        console.error(`[bilibili] SSO 跨域登录失败（继续）: ${sso.error}`);
       }
     }
-    const newRefreshToken = (refreshed.payload.data as { refresh_token?: string } | undefined)
-      ?.refresh_token;
-    if (newRefreshToken) {
-      this.refreshToken = newRefreshToken;
-    }
-    this.#saveCookieFile();
 
-    // 4) 确认更新：让旧 refresh_token 失效（失败只记日志，新 Cookie 已可用）
+    // 6) 确认更新：让旧 refresh_token 失效（用新 jct + 旧 refresh_token）
     const confirm = await this.#softJson(COOKIE_CONFIRM_REFRESH_URL, {
       method: 'POST',
       headers: {
@@ -544,8 +631,21 @@ export class BilibiliClient {
       body: new URLSearchParams({ csrf: newJct, refresh_token: refreshTokenOld }).toString(),
     });
     if (!confirm.ok) {
-      console.error(`[bilibili] confirm/refresh 失败（新 Cookie 已生效）: ${confirm.error}`);
+      // 新 Cookie 已通过 nav 自检，仍照常落盘；这里只把 B 站原始响应记全，便于定位 -400
+      console.error(
+        `[bilibili] confirm/refresh 失败（新 Cookie 已自检通过，继续使用）: ${confirm.error}` +
+          `${confirm.code ? `（code=${confirm.code}）` : ''} ${redactPayload(confirm.payload)}`,
+      );
     }
+
+    // 7) 自检通过才落盘：新 Cookie + 轮换后的刷新口令
+    if (newRefreshToken) {
+      this.refreshToken = newRefreshToken;
+    }
+    this.#saveCookieFile();
+    console.log(
+      `[bilibili] 续期完成：nav 自检通过，confirm ${confirm.ok ? '成功' : '失败（新 Cookie 仍可用）'}`,
+    );
 
     return {
       refreshed: true,
