@@ -1,28 +1,25 @@
-import { ProxyAgent, fetch as undiciFetch } from 'undici';
+import { EnvHttpProxyAgent, fetch as undiciFetch } from 'undici';
 
-/**
- * 构造 fetch：若配置了 HTTPS_PROXY / HTTP_PROXY（或小写），
- * 则通过 undici ProxyAgent 走代理（用于国内直连 Twitter CDN 失败的环境）。
- * 未配置代理时返回全局 fetch。
- */
-export function createProxyFetch(env: NodeJS.ProcessEnv = process.env): typeof fetch {
-  const proxy =
-    env.HTTPS_PROXY ||
-    env.https_proxy ||
-    env.HTTP_PROXY ||
-    env.http_proxy ||
-    '';
-  if (!proxy) {
-    return globalThis.fetch;
-  }
-  const agent = new ProxyAgent(proxy);
-  const proxyFetch = ((
-    input: Parameters<typeof fetch>[0],
-    init?: RequestInit,
-  ) =>
-    undiciFetch(input as Parameters<typeof undiciFetch>[0], {
+/** 外部媒体使用代理；内部服务及 NO_PROXY 指定的目标直连。 */
+export function createProxyFetch(
+  env: NodeJS.ProcessEnv = process.env,
+  directUrls: string[] = [],
+): typeof fetch {
+  const httpProxy = env.HTTP_PROXY || env.http_proxy || '';
+  const httpsProxy = env.HTTPS_PROXY || env.https_proxy || httpProxy;
+  if (!httpProxy && !httpsProxy) return globalThis.fetch;
+  const directOrigins = new Set(directUrls.map((url) => new URL(url).origin));
+  const agent = new EnvHttpProxyAgent({
+    httpProxy,
+    httpsProxy,
+    noProxy: env.NO_PROXY ?? env.no_proxy ?? '',
+  });
+  return ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (directOrigins.has(url.origin)) return globalThis.fetch(input, init);
+    return undiciFetch(input as Parameters<typeof undiciFetch>[0], {
       ...init,
       dispatcher: agent,
-    })) as typeof fetch;
-  return proxyFetch;
+    });
+  }) as typeof fetch;
 }

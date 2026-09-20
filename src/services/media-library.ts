@@ -183,13 +183,19 @@ export class DefaultMediaLibrary implements MediaLibrary {
 
   async ensurePhotos(tweetId: number): Promise<StoredMedia[]> {
     const tweet = this.#requireTweet(tweetId);
+    const expected = expectedMediaCounts(tweet).photo;
     const photos = (await this.listMedia(tweetId)).filter((file) => file.kind === 'photo');
     // 本地图片已齐（数量不少于库内记录的图片数）→ 直接用，不联网
-    if (photos.length > 0 && photos.length >= expectedMediaCounts(tweet).photo) {
+    if (photos.length > 0 && photos.length >= expected) {
       return photos;
     }
     const result = await this.cacheMedia(tweetId);
-    return result.files.filter((file) => file.kind === 'photo');
+    const downloaded = result.files.filter((file) => file.kind === 'photo');
+    const failures = result.skipped.filter((item) => item.name.startsWith('photo'));
+    if (downloaded.length < expected || failures.length > 0) {
+      throw new Error(`原图下载不完整（${downloaded.length}/${expected}），请重试`);
+    }
+    return downloaded;
   }
 
   async cleanupOlderThan(days: number): Promise<{ files: number; dirs: number }> {

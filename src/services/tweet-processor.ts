@@ -16,6 +16,7 @@ import type { WorkflowService } from './workflow-service.js';
  */
 export interface NewTweetProcessor {
   process(tweets: Tweet[]): Promise<void>;
+  retryFailedScreenshots(): Promise<void>;
 }
 
 export interface NewTweetProcessorOptions {
@@ -33,6 +34,7 @@ export class DefaultNewTweetProcessor implements NewTweetProcessor {
   private readonly screenshot: ScreenshotService;
   private readonly media: MediaLibrary;
   private readonly notifications?: NotificationRepository;
+  private readonly processing = new Set<number>();
 
   constructor(options: NewTweetProcessorOptions) {
     this.tweets = options.tweets;
@@ -44,45 +46,68 @@ export class DefaultNewTweetProcessor implements NewTweetProcessor {
 
   async process(newTweets: Tweet[]): Promise<void> {
     for (const tweet of newTweets) {
-      // 1) 推文截图
+      const current = this.tweets.findById(tweet.id);
+      if (!current || current.screenshotPath || this.processing.has(tweet.id)) continue;
+      this.processing.add(tweet.id);
       try {
-        const screenshotPath = await this.screenshot.render(tweet.id);
-        this.tweets.setScreenshotPath(tweet.id, screenshotPath);
-        this.workflow.transition(tweet.id, WorkflowStatus.SCREENSHOT_READY);
-        log('tweet.screenshot.complete', `#${tweet.id} ${screenshotPath}`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        this.tweets.updateWorkflowStatus(tweet.id, WorkflowStatus.DETECTED, { lastError: message });
-        log('tweet.screenshot.failed', `#${tweet.id}: ${message}`);
-        continue; // 截图失败不再处理通知与媒体
+        await this.#processTweet(tweet);
+      } finally {
+        this.processing.delete(tweet.id);
       }
+    }
+  }
 
-      // 2) 生成 QQ 通知记录（NoneBot2 拉取发送）
-      if (this.notifications) {
-        try {
-          const updated = this.tweets.findById(tweet.id);
-          if (updated) {
-            this.notifications.create({
-              tweetId: tweet.id,
-              text: formatNewTweetNotification(updated),
-              screenshotPath: updated.screenshotPath,
-              videoThumbnails: [],
-            });
-            log('qq.notification.created', `#${tweet.id}`);
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          log('qq.notification.failed', `#${tweet.id}: ${message}`);
+  async retryFailedScreenshots(): Promise<void> {
+    await this.process(this.tweets.listScreenshotRetries());
+  }
+
+  async #processTweet(tweet: Tweet): Promise<void> {
+    // 1) 推文截图
+    try {
+      const screenshotPath = await this.screenshot.render(tweet.id);
+      this.tweets.setScreenshotPath(tweet.id, screenshotPath);
+      const current = this.tweets.findById(tweet.id);
+      if (current?.workflowStatus === WorkflowStatus.DETECTED) {
+        this.workflow.transition(tweet.id, WorkflowStatus.SCREENSHOT_READY, { lastError: null, retryCount: 0 });
+      }
+      log('tweet.screenshot.complete', `#${tweet.id} ${screenshotPath}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const current = this.tweets.findById(tweet.id);
+      if (current?.workflowStatus === WorkflowStatus.DETECTED) {
+        this.tweets.updateWorkflowStatus(tweet.id, WorkflowStatus.DETECTED, {
+          lastError: message, retryCount: current.retryCount + 1,
+        });
+      }
+      log('tweet.screenshot.failed', `#${tweet.id}: ${message}`);
+      return; // 后台定时重试，不依赖该推文仍在时间线中
+    }
+
+    // 2) 生成 QQ 通知记录（NoneBot2 拉取发送）
+    if (this.notifications) {
+      try {
+        const updated = this.tweets.findById(tweet.id);
+        if (updated) {
+          this.notifications.create({
+            tweetId: tweet.id,
+            text: formatNewTweetNotification(updated),
+            screenshotPath: updated.screenshotPath,
+            videoThumbnails: [],
+          });
+          log('qq.notification.created', `#${tweet.id}`);
         }
-      }
-
-      // 3) 媒体下载（图片 name=orig + 最高码率视频），统一存入 cache/media/<推文ID>/
-      try {
-        await this.media.cacheMedia(tweet.id);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        log('tweet.media.failed', `#${tweet.id}: ${message}`);
+        log('qq.notification.failed', `#${tweet.id}: ${message}`);
       }
+    }
+
+    // 3) 媒体下载（图片 name=orig + 最高码率视频），统一存入 cache/media/<推文ID>/
+    try {
+      await this.media.cacheMedia(tweet.id);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log('tweet.media.failed', `#${tweet.id}: ${message}`);
     }
   }
 }

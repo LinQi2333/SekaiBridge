@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { constants, createHmac, createPublicKey, publicEncrypt } from 'node:crypto';
+import { constants, createHmac, createPublicKey, publicEncrypt, randomUUID } from 'node:crypto';
+import { consumeResponse } from '../http/response.js';
 import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from './errors.js';
 import type { UploadedImage } from './image-upload.js';
 import { extractKeyFromImageUrl, signWbi, type WbiSignResult } from './wbi.js';
@@ -122,26 +123,23 @@ export function cookieValue(cookieString: string, name: string): string | null {
 
 /**
  * 在 Cookie 串上批量替换/追加 name=value，返回**新串**（不改原串）。
- * 用函数式替换：避免值里出现 `$&`/`$'` 这类字符被当成替换模式。
+ * 按字段解析、序列化，保留分隔符；避免值里出现 `$&`/`$'` 这类字符被当成替换模式。
  */
 export function withCookiePairs(
   base: string,
   cookies: Record<string, string>,
   names: string[],
 ): string {
-  let result = base;
+  const pairs = new Map<string, string>();
+  for (const part of base.split(';')) {
+    const index = part.indexOf('=');
+    if (index > 0) pairs.set(part.slice(0, index).trim(), part.slice(index + 1).trim());
+  }
   for (const name of names) {
     const value = cookies[name];
-    if (!value) continue;
-    const pattern = new RegExp(`(?:^|;\\s*)${name}=[^;]*`);
-    if (pattern.test(result)) {
-      result = result.replace(pattern, () => `${name}=${value}`);
-    } else {
-      const trimmed = result.trim();
-      result = trimmed.length > 0 ? `${trimmed}; ${name}=${value}` : `${name}=${value}`;
-    }
+    if (value) pairs.set(name, value);
   }
-  return result;
+  return [...pairs].map(([name, value]) => `${name}=${value}`).join('; ');
 }
 
 /** 日志用：打印 B 站响应，敏感字段（token/cookie 类）只留长度。 */
@@ -180,6 +178,8 @@ export class BilibiliClient {
   private wbiCache: { keys: WbiKeys; expiresAt: number } | null = null;
   /** 当前生效的持久化刷新口令（ac_time_value），来自凭据文件。 */
   private refreshToken: string | null;
+  private pendingRefreshTokens: string[] = [];
+  private refreshInFlight: Promise<CookieRefreshResult> | null = null;
 
   constructor(options: BilibiliClientOptions) {
     this.cookieFile = options.cookieFile;
@@ -189,6 +189,7 @@ export class BilibiliClient {
     this.refreshToken =
       fromFile?.refreshToken ??
       (this.cookieString ? cookieValue(this.cookieString, 'ac_time_value') : null);
+    this.pendingRefreshTokens = fromFile?.pendingRefreshTokens ?? [];
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.wbiCacheTtlMs = options.wbiCacheTtlMs ?? 60 * 60 * 1000;
@@ -307,44 +308,47 @@ export class BilibiliClient {
   }
 
   async #request(url: string, init: RequestInit): Promise<BiliResponse> {
-    const response = await this.#fetchRaw(url, init);
-
-    if (response.status === 401 || response.status === 412) {
-      throw new BilibiliAuthError(`Bilibili 登录失效（HTTP ${response.status}）`, response.status);
-    }
-    if (!response.ok) {
-      throw new BilibiliNetworkError(`Bilibili HTTP ${response.status}`);
-    }
-
-    let payload: BiliResponse;
-    try {
-      payload = (await response.json()) as BiliResponse;
-    } catch {
-      throw new BilibiliNetworkError('Bilibili 返回了无效 JSON');
-    }
-
-    if (payload.code !== 0) {
-      const message = payload.message || `Bilibili 错误 code=${payload.code}`;
-      if (AUTH_CODES.has(payload.code)) {
-        throw new BilibiliAuthError(`Bilibili 登录失效: ${message}`, payload.code);
+    return this.#fetchRaw(url, init, async (response) => {
+      if (response.status === 401 || response.status === 412) {
+        throw new BilibiliAuthError(`Bilibili 登录失效（HTTP ${response.status}）`, response.status);
       }
-      // 错误信息带 code，便于定位（如 -352 风控 / -400 参数）
-      throw new BilibiliApiError(`${message}（code=${payload.code}）`, payload.code);
-    }
-    return payload;
+      if (!response.ok) {
+        throw new BilibiliNetworkError(`Bilibili HTTP ${response.status}`);
+      }
+
+      let payload: BiliResponse;
+      try {
+        payload = (await response.json()) as BiliResponse;
+      } catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw new BilibiliNetworkError('Bilibili 返回了无效 JSON');
+      }
+
+      if (payload.code !== 0) {
+        const message = payload.message || `Bilibili 错误 code=${payload.code}`;
+        if (AUTH_CODES.has(payload.code)) {
+          throw new BilibiliAuthError(`Bilibili 登录失效: ${message}`, payload.code);
+        }
+        // 错误信息带 code，便于定位（如 -352 风控 / -400 参数）
+        throw new BilibiliApiError(`${message}（code=${payload.code}）`, payload.code);
+      }
+      return payload;
+    });
   }
 
   /** 底层请求：统一带 Cookie 与浏览器风格头，网络异常转 BilibiliNetworkError。 */
-  async #fetchRaw(url: string, init: RequestInit): Promise<Response> {
+  async #fetchRaw<T>(
+    url: string,
+    init: RequestInit,
+    consume: (response: Response) => Promise<T>,
+  ): Promise<T> {
     if (!this.hasCookie()) {
       throw new BilibiliAuthError(
         '未配置 Bilibili 凭据：请先运行扫码登录工具（docker compose stop app && docker compose --profile tools run --rm bili-login && docker compose up -d app）',
       );
     }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      return await this.fetchImpl(url, {
+      return await consumeResponse(this.fetchImpl, url, {
         ...init,
         headers: {
           cookie: this.#cookieHeader(),
@@ -363,15 +367,15 @@ export class BilibiliClient {
           referer: 'https://t.bilibili.com/',
           ...init.headers,
         },
-        signal: controller.signal,
-      });
+      }, this.timeoutMs, consume);
     } catch (error) {
+      if (error instanceof BilibiliApiError || error instanceof BilibiliAuthError || error instanceof BilibiliNetworkError) {
+        throw error;
+      }
       const timedOut = error instanceof Error && error.name === 'AbortError';
       throw new BilibiliNetworkError(
         timedOut ? `Bilibili 请求超时: ${url}` : `无法连接 Bilibili: ${String(error)}`,
       );
-    } finally {
-      clearTimeout(timer);
     }
   }
 
@@ -386,36 +390,26 @@ export class BilibiliClient {
     | { ok: true; payload: BiliResponse; response: Response }
     | { ok: false; error: string; code?: number; payload?: unknown; status?: number }
   > {
-    let response: Response;
     try {
-      response = await this.#fetchRaw(url, init);
+      return await this.#fetchRaw(url, init, async (response) => {
+        let payload: BiliResponse;
+        try {
+          payload = (await response.json()) as BiliResponse;
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+          return { ok: false as const, error: response.ok ? '返回了无效 JSON' : `HTTP ${response.status}` };
+        }
+        if (!response.ok) {
+          return { ok: false as const, error: `HTTP ${response.status}`, status: response.status, payload };
+        }
+        if (payload.code !== 0) {
+          return { ok: false as const, error: payload.message || `code=${payload.code}`, code: payload.code, payload };
+        }
+        return { ok: true as const, payload, response };
+      });
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
     }
-    if (!response.ok) {
-      let body: unknown;
-      try {
-        body = await response.json();
-      } catch {
-        body = undefined;
-      }
-      return { ok: false, error: `HTTP ${response.status}`, status: response.status, payload: body };
-    }
-    let payload: BiliResponse;
-    try {
-      payload = (await response.json()) as BiliResponse;
-    } catch {
-      return { ok: false, error: '返回了无效 JSON' };
-    }
-    if (payload.code !== 0) {
-      return {
-        ok: false,
-        error: payload.message || `code=${payload.code}`,
-        code: payload.code,
-        payload,
-      };
-    }
-    return { ok: true, payload, response };
   }
 
   /** csrf token：取凭据串里的 `bili_jct`（与 Cookie 头同源）。 */
@@ -431,9 +425,10 @@ export class BilibiliClient {
 
   /**
    * 检查当前会话：是否登录、B 站是否提示需要刷新（SESSDATA 临近过期）。
-   * 纯查询接口，不产生任何内容。
+   * 同时重试已经落盘的续期确认；不创建动态等内容。
    */
   async checkSession(): Promise<{ loggedIn: boolean; uname: string | null; refreshNeeded: boolean }> {
+    await this.#confirmPendingRefresh();
     let loggedIn = false;
     let uname: string | null = null;
     try {
@@ -462,9 +457,10 @@ export class BilibiliClient {
 
   /**
    * 刷新 bili_ticket（官方 GenWebTicket，浏览器同款），并把新值写回 cookie。
-   * 返回新 ticket 与过期时间（秒）；失败返回 null（保持旧值）。
+   * 返回新 ticket 与过期时间（秒）；响应缺少 ticket 时返回 null，网络或落盘失败抛错。
    */
   async refreshTicket(): Promise<{ ticket: string; expiresAt: number } | null> {
+    if (this.refreshInFlight) await this.refreshInFlight;
     const ts = Math.floor(Date.now() / 1000);
     const hexsign = createHmac('sha256', TICKET_HMAC_KEY).update(`ts${ts}`).digest('hex');
     const params = new URLSearchParams({
@@ -479,27 +475,12 @@ export class BilibiliClient {
       return null;
     }
     const expiresAt = (data.created_at ?? ts) + (data.ttl ?? 0);
-    this.#setCookiePair('bili_ticket', data.ticket);
-    this.#setCookiePair('bili_ticket_expires', String(expiresAt));
+    const candidate = withCookiePairs(this.cookieString, {
+      bili_ticket: data.ticket, bili_ticket_expires: String(expiresAt),
+    }, ['bili_ticket', 'bili_ticket_expires']);
+    this.#saveCookieFile(candidate);
+    this.cookieString = candidate;
     return { ticket: data.ticket, expiresAt };
-  }
-
-  /** 替换（或追加）cookie 串中的某个 name=value 并持久化。 */
-  #setCookiePair(name: string, value: string): void {
-    this.#assignCookiePair(name, value);
-    this.#saveCookieFile();
-  }
-
-  /** 只改内存中的 cookie 串（批量更新时最后统一落盘）。 */
-  #assignCookiePair(name: string, value: string): void {
-    const pattern = new RegExp(`(?:^|;\\s*)${name}=[^;]*`);
-    if (pattern.test(this.cookieString)) {
-      // 函数式替换：值里的 $& / $' 不会被当成替换模式
-      this.cookieString = this.cookieString.replace(pattern, () => `${name}=${value}`);
-    } else {
-      const base = this.cookieString.trim();
-      this.cookieString = base.length > 0 ? `${base}; ${name}=${value}` : `${name}=${value}`;
-    }
   }
 
   // ---------- SESSDATA 自动续期（Web 端 Cookie 刷新机制） ----------
@@ -509,148 +490,102 @@ export class BilibiliClient {
     return Boolean(this.refreshToken);
   }
 
-  /**
-   * 按 B 站 Web 端流程续期 SESSDATA：
-   * cookie/info（是否需要刷新）→ CorrespondPath → refresh_csrf → cookie/refresh
-   * → **nav 自检** → SSO 跨域 → confirm/refresh → 落盘。
-   *
-   * 关键安全点：新 Cookie **先自检再落盘**。B 站的刷新是一整套流程，
-   * 半途失败（历史故障：confirm 400）时新 Cookie 可能不可用，
-   * 若直接覆盖旧值就会把还能用的会话换成"未登录"。自检不通过时保留旧值并立刻告警。
-   */
-  async refreshLoginCookie(): Promise<CookieRefreshResult> {
-    if (!this.hasCookie()) {
-      return { refreshed: false, reason: '未配置 Cookie' };
+  /** 刷新调用合并；新凭据自检、原子落盘成功后才确认旧凭据失效。 */
+  refreshLoginCookie(): Promise<CookieRefreshResult> {
+    if (!this.refreshInFlight) {
+      this.refreshInFlight = this.#refreshLoginCookie().finally(() => {
+        this.refreshInFlight = null;
+      });
     }
-    const refreshTokenOld = this.refreshToken;
-    if (!refreshTokenOld) {
-      return {
-        refreshed: false,
-        reason: '缺少 refresh_token（ac_time_value），无法自动续期',
-      };
-    }
+    return this.refreshInFlight;
+  }
 
-    // 1) 是否需要刷新（B 站自己的判断，避免无谓的敏感接口调用）
-    const info = await this.#softJson(
-      `${COOKIE_INFO_URL}?csrf=${encodeURIComponent(this.#jct())}`,
-    );
-    if (!info.ok) {
-      return { refreshed: false, reason: `cookie/info 失败: ${info.error}` };
-    }
-    const infoData = info.payload.data as { refresh?: boolean; timestamp?: number } | undefined;
-    if (infoData?.refresh !== true) {
-      return { refreshed: false, reason: 'B站未提示需要刷新' };
-    }
-    const timestamp = infoData.timestamp ?? Date.now();
+  async #refreshLoginCookie(): Promise<CookieRefreshResult> {
+    if (!this.hasCookie()) return { refreshed: false, reason: '未配置 Cookie' };
+    await this.#confirmPendingRefresh();
+    const oldToken = this.refreshToken;
+    if (!oldToken) return { refreshed: false, reason: '缺少 refresh_token（ac_time_value），无法自动续期' };
 
-    // 2) 实时刷新口令 refresh_csrf
-    const correspond = correspondPath(timestamp);
-    const refreshCsrf =
-      (await this.#refreshCsrfByApi(correspond)) ?? (await this.#refreshCsrfByPage(correspond));
-    if (!refreshCsrf) {
-      return { refreshed: false, reason: '获取 refresh_csrf 失败（CorrespondPath 失效或被风控）' };
-    }
-
-    // 3) 刷新 Cookie（响应 set-cookie 里是新的 SESSDATA/bili_jct 等），先只在内存里组装
-    const refreshed = await this.#softJson(COOKIE_REFRESH_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        origin: 'https://www.bilibili.com',
-        referer: 'https://www.bilibili.com/',
-      },
-      body: new URLSearchParams({
-        csrf: this.#jct(),
-        refresh_csrf: refreshCsrf,
-        source: 'main_web',
-        refresh_token: refreshTokenOld,
-      }).toString(),
-    });
-    if (!refreshed.ok) {
-      if (refreshed.code === REFRESH_TOKEN_MISMATCH_CODE) {
-        // 口令已作废：清掉它，避免每轮都用废口令重试；之后需要重新扫码登录
-        this.refreshToken = null;
-        this.#saveCookieFile();
+    // 86095 也可能仅为实时 CSRF 失效：重新取时间戳和 CSRF，最多重试一次。
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const info = await this.#softJson(`${COOKIE_INFO_URL}?csrf=${encodeURIComponent(this.#jct())}`);
+      if (!info.ok) return { refreshed: false, reason: `cookie/info 失败: ${info.error}` };
+      const data = info.payload.data as { refresh?: boolean; timestamp?: number } | undefined;
+      if (data?.refresh !== true) return { refreshed: false, reason: 'B站未提示需要刷新' };
+      const correspond = correspondPath(data.timestamp ?? Date.now());
+      const csrf = (await this.#refreshCsrfByApi(correspond)) ?? (await this.#refreshCsrfByPage(correspond));
+      if (!csrf) return { refreshed: false, reason: '获取 refresh_csrf 失败' };
+      const refreshed = await this.#softJson(COOKIE_REFRESH_URL, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          origin: 'https://www.bilibili.com', referer: 'https://www.bilibili.com/',
+        },
+        body: new URLSearchParams({ csrf: this.#jct(), refresh_csrf: csrf,
+          source: 'main_web', refresh_token: oldToken }).toString(),
+      });
+      if (!refreshed.ok) {
+        if (refreshed.code === REFRESH_TOKEN_MISMATCH_CODE && attempt === 0) continue;
+        console.error(`[bilibili] cookie/refresh 失败: ${refreshed.error} ${redactPayload(refreshed.payload)}`);
+        return { refreshed: false, reason: `cookie/refresh 失败: ${refreshed.error}（code=${refreshed.code ?? 'unknown'}），已保留刷新口令` };
       }
-      console.error(
-        `[bilibili] cookie/refresh 失败：${refreshed.error}${refreshed.code ? `（code=${refreshed.code}）` : ''} ${redactPayload(refreshed.payload)}`,
-      );
-      return {
-        refreshed: false,
-        reason: `cookie/refresh 失败: ${refreshed.error}${refreshed.code ? `（code=${refreshed.code}）` : ''}`,
-      };
+      const headers = refreshed.response.headers.getSetCookie();
+      const cookies = parseSetCookies(headers);
+      const result = refreshed.payload.data as { refresh_token?: string; url?: string } | undefined;
+      const newToken = result?.refresh_token;
+      if (!cookies.SESSDATA || !cookies.bili_jct || !newToken) {
+        return { refreshed: false, reason: '刷新响应缺少 SESSDATA、bili_jct 或 refresh_token，已保留旧凭据' };
+      }
+      const candidate = withCookiePairs(this.cookieString, cookies, REFRESHED_COOKIE_NAMES);
+      // 验证候选 Cookie 时不修改共享状态，避免并发业务请求读到未经验证的凭据。
+      const check = await this.#softJson(NAV_URL, { headers: { cookie: candidate } });
+      if (!check.ok || (check.payload.data as { isLogin?: boolean } | undefined)?.isLogin !== true) {
+        console.error('[bilibili] 新 Cookie 自检未通过，已保留旧 Cookie');
+        return { refreshed: false, reason: '新 Cookie 自检未通过，已保留旧 Cookie' };
+      }
+      const pending = [...new Set([...this.pendingRefreshTokens, oldToken])];
+      try {
+        this.#saveCookieFile(candidate, newToken, pending);
+      } catch {
+        return { refreshed: false, reason: '新凭据写入失败，未确认旧凭据失效；已保留旧 Cookie' };
+      }
+      this.cookieString = candidate;
+      this.refreshToken = newToken;
+      this.pendingRefreshTokens = pending;
+      await this.#confirmPendingRefresh();
+      if (result?.url) {
+        const sso = await this.#softJson(result.url);
+        if (!sso.ok) console.error(`[bilibili] SSO 跨域登录失败（继续）: ${sso.error}`);
+      }
+      const sessdataHeader = headers.find((header) => /^SESSDATA=/i.test(header.trim()));
+      return { refreshed: true, sessdataExpiresAt: sessdataHeader ? setCookieExpiry(sessdataHeader) : null };
     }
+    return { refreshed: false, reason: '刷新失败，已保留刷新口令' };
+  }
 
-    const setCookieHeaders = refreshed.response.headers.getSetCookie?.() ?? [];
-    const cookies = parseSetCookies(setCookieHeaders);
-    const sessdataHeader = setCookieHeaders.find((h) => /^SESSDATA=/i.test(h.trim()));
-    const newJct = cookies['bili_jct'] ?? this.#jct();
-    const ssoUrl = (refreshed.payload.data as { url?: string } | undefined)?.url ?? null;
-    const newRefreshToken =
-      (refreshed.payload.data as { refresh_token?: string } | undefined)?.refresh_token ?? null;
-
-    // 4) 自检：用「新 Cookie」调 nav，isLogin 不为 true 就整体回滚（不落盘）
-    const previousCookieString = this.cookieString;
-    const previousRefreshToken = this.refreshToken;
-    const candidate = withCookiePairs(previousCookieString, cookies, REFRESHED_COOKIE_NAMES);
-    this.cookieString = candidate;
-    const check = await this.#softJson(NAV_URL);
-    const loggedIn =
-      check.ok && (check.payload.data as { isLogin?: boolean } | undefined)?.isLogin === true;
-    if (!loggedIn) {
-      this.cookieString = previousCookieString;
-      this.refreshToken = previousRefreshToken;
-      const detail = check.ok
-        ? 'nav 返回 isLogin=false'
-        : `nav 请求失败: ${check.error}${check.code ? `（code=${check.code}）` : ''}`;
-      console.error(
-        `[bilibili] ⚠️ 续期后的新 Cookie 自检未通过（${detail}），已回滚为旧 Cookie 且未落盘`,
-      );
-      return {
-        refreshed: false,
-        reason: `新 Cookie 自检未通过（${detail}），已保留旧 Cookie`,
-      };
-    }
-
-    // 5) SSO 跨域登录（官方流程最后一步；失败只记日志，不影响主站会话）
-    if (ssoUrl) {
-      const sso = await this.#softJson(ssoUrl);
-      if (!sso.ok) {
-        console.error(`[bilibili] SSO 跨域登录失败（继续）: ${sso.error}`);
+  /** 待确认口令随新凭据落盘；重启后可补确认，失败不阻塞新会话使用。 */
+  async #confirmPendingRefresh(): Promise<void> {
+    for (const token of [...this.pendingRefreshTokens]) {
+      const confirm = await this.#softJson(COOKIE_CONFIRM_REFRESH_URL, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          origin: 'https://www.bilibili.com', referer: 'https://www.bilibili.com/',
+        },
+        body: new URLSearchParams({ csrf: this.#jct(), refresh_token: token }).toString(),
+      });
+      if (!confirm.ok) {
+        console.error(`[bilibili] confirm/refresh 失败（新凭据已保存，下次重试）: ${confirm.error}（code=${confirm.code ?? 'unknown'}） ${redactPayload(confirm.payload)}`);
+        continue;
+      }
+      const pending = this.pendingRefreshTokens.filter((item) => item !== token);
+      try {
+        this.#saveCookieFile(this.cookieString, this.refreshToken, pending);
+        this.pendingRefreshTokens = pending;
+      } catch {
+        // 新凭据此前已可靠保存；这里只是清理待确认标记失败。
       }
     }
-
-    // 6) 确认更新：让旧 refresh_token 失效（用新 jct + 旧 refresh_token）
-    const confirm = await this.#softJson(COOKIE_CONFIRM_REFRESH_URL, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/x-www-form-urlencoded',
-        origin: 'https://www.bilibili.com',
-        referer: 'https://www.bilibili.com/',
-      },
-      body: new URLSearchParams({ csrf: newJct, refresh_token: refreshTokenOld }).toString(),
-    });
-    if (!confirm.ok) {
-      // 新 Cookie 已通过 nav 自检，仍照常落盘；这里只把 B 站原始响应记全，便于定位 -400
-      console.error(
-        `[bilibili] confirm/refresh 失败（新 Cookie 已自检通过，继续使用）: ${confirm.error}` +
-          `${confirm.code ? `（code=${confirm.code}）` : ''} ${redactPayload(confirm.payload)}`,
-      );
-    }
-
-    // 7) 自检通过才落盘：新 Cookie + 轮换后的刷新口令
-    if (newRefreshToken) {
-      this.refreshToken = newRefreshToken;
-    }
-    this.#saveCookieFile();
-    console.log(
-      `[bilibili] 续期完成：nav 自检通过，confirm ${confirm.ok ? '成功' : '失败（新 Cookie 仍可用）'}`,
-    );
-
-    return {
-      refreshed: true,
-      sessdataExpiresAt: sessdataHeader ? setCookieExpiry(sessdataHeader) : null,
-    };
   }
 
   /** 优先走 JSON 版 refresh_csrf 接口（存在时比抓 HTML 稳）。 */
@@ -672,65 +607,73 @@ export class BilibiliClient {
 
   /** 兜底：抓 correspond 页面 HTML 里的 `1-name` 节点。 */
   async #refreshCsrfByPage(correspond: string): Promise<string | null> {
-    let response: Response;
     try {
-      response = await this.#fetchRaw(`${CORRESPOND_URL}${correspond}`, {
+      return await this.#fetchRaw(`${CORRESPOND_URL}${correspond}`, {
         headers: {
           accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'sec-fetch-dest': 'iframe',
-          'sec-fetch-mode': 'navigate',
-          'sec-fetch-site': 'same-site',
-          origin: 'https://www.bilibili.com',
+          'sec-fetch-dest': 'iframe', 'sec-fetch-mode': 'navigate',
+          'sec-fetch-site': 'same-site', origin: 'https://www.bilibili.com',
           referer: 'https://www.bilibili.com/',
         },
-      });
-    } catch {
-      return null;
-    }
-    if (!response.ok) {
-      return null;
-    }
-    try {
-      return extractRefreshCsrf(await response.text());
+      }, async (response) => response.ok ? extractRefreshCsrf(await response.text()) : null);
     } catch {
       return null;
     }
   }
 
-  #loadCookieFromFile(): { cookieString: string; refreshToken: string | null } | null {
+  #loadCookieFromFile(): { cookieString: string; refreshToken: string | null; pendingRefreshTokens: string[] } | null {
     try {
       if (!fs.existsSync(this.cookieFile)) return null;
       const parsed = JSON.parse(fs.readFileSync(this.cookieFile, 'utf8')) as {
         cookieString?: string;
         refreshToken?: string;
+        pendingRefreshTokens?: unknown;
       };
       const value = parsed.cookieString?.trim();
       if (!value || !/SESSDATA=/.test(value) || !/bili_jct=/.test(value)) {
         return null;
       }
-      return { cookieString: value, refreshToken: parsed.refreshToken?.trim() || null };
+      return {
+        cookieString: value, refreshToken: parsed.refreshToken?.trim() || null,
+        pendingRefreshTokens: Array.isArray(parsed.pendingRefreshTokens)
+          ? parsed.pendingRefreshTokens.filter((item): item is string => typeof item === 'string' && item.length > 0) : [],
+      };
     } catch {
       return null;
     }
   }
 
-  #saveCookieFile(): void {
+  #saveCookieFile(
+    cookieString = this.cookieString,
+    refreshToken = this.refreshToken,
+    pendingRefreshTokens = this.pendingRefreshTokens,
+  ): void {
+    const temporary = `${this.cookieFile}.${randomUUID()}.tmp`;
+    let fd: number | undefined;
     try {
       fs.mkdirSync(path.dirname(this.cookieFile), { recursive: true });
-      fs.writeFileSync(
-        this.cookieFile,
-        JSON.stringify(
-          {
-            cookieString: this.cookieString,
-            refreshToken: this.refreshToken,
-            updatedAt: new Date().toISOString(),
-          },
-          null,
-          2,
-        ),
-      );
+      fd = fs.openSync(temporary, 'wx', 0o600);
+      fs.writeFileSync(fd, JSON.stringify({ cookieString, refreshToken, pendingRefreshTokens,
+        updatedAt: new Date().toISOString() }, null, 2));
+      fs.fsyncSync(fd);
+      fs.closeSync(fd);
+      fd = undefined;
+      fs.renameSync(temporary, this.cookieFile);
+      // Linux/Docker 上同步目录，确保原子替换也能跨崩溃保留。
+      if (process.platform !== 'win32') {
+        const directory = fs.openSync(path.dirname(this.cookieFile), 'r');
+        try {
+          fs.fsyncSync(directory);
+        } finally {
+          fs.closeSync(directory);
+        }
+      }
     } catch (error) {
       console.error('[bilibili] cookie 文件写入失败:', error);
+      throw error;
+    } finally {
+      if (fd !== undefined) fs.closeSync(fd);
+      if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
     }
   }
 }

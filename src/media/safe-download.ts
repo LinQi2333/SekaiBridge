@@ -1,3 +1,4 @@
+import { consumeResponse } from '../http/response.js';
 import { MediaDownloadError } from './media-download-error.js';
 
 /** 允许的图片 Content-Type 白名单（规格 §48 图片格式白名单）。 */
@@ -64,44 +65,46 @@ export async function safeDownload(
     throw new MediaDownloadError('BAD_PROTOCOL', `只允许 HTTP/HTTPS 下载，收到: ${parsed.protocol}`);
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  let response: Response;
   try {
-    response = await fetchImpl(url, { signal: controller.signal });
+    return await consumeResponse(fetchImpl, url, {}, timeoutMs, async (response) => {
+      if (!response.ok) {
+        throw new MediaDownloadError('HTTP_ERROR', `下载返回 HTTP ${response.status}: ${truncate(url, 200)}`, response.status);
+      }
+      const contentType = normalizeContentType(response.headers.get('content-type'));
+      if (!allowed.includes(contentType)) {
+        throw new MediaDownloadError('BAD_CONTENT_TYPE', `Content-Type 不在白名单: ${contentType || '(空)'}`);
+      }
+      const tooLarge = () => new MediaDownloadError('TOO_LARGE', `文件超过大小限制 ${maxBytes} 字节: ${truncate(url, 200)}`);
+      if (Number(response.headers.get('content-length')) > maxBytes) throw tooLarge();
+      const chunks: Buffer[] = [];
+      let size = 0;
+      if (response.body) {
+        const reader = response.body.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            size += value.byteLength;
+            if (size > maxBytes) {
+              void reader.cancel().catch(() => {});
+              throw tooLarge();
+            }
+            chunks.push(Buffer.from(value));
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+      return { bytes: Buffer.concat(chunks, size), contentType, url };
+    });
   } catch (error) {
+    if (error instanceof MediaDownloadError) throw error;
     const timedOut = error instanceof Error && error.name === 'AbortError';
     throw new MediaDownloadError(
       timedOut ? 'TIMEOUT' : 'FETCH_FAILED',
       timedOut ? `下载超时（${timeoutMs}ms）: ${truncate(url, 200)}` : `下载失败: ${truncate(url, 200)}`,
     );
-  } finally {
-    clearTimeout(timer);
   }
-
-  if (!response.ok) {
-    throw new MediaDownloadError('HTTP_ERROR', `下载返回 HTTP ${response.status}: ${truncate(url, 200)}`, response.status);
-  }
-
-  const contentType = normalizeContentType(response.headers.get('content-type'));
-  if (!allowed.includes(contentType)) {
-    throw new MediaDownloadError(
-      'BAD_CONTENT_TYPE',
-      `Content-Type 不在白名单: ${contentType || '(空)'}（${truncate(url, 200)}）`,
-    );
-  }
-
-  const declaredLength = Number(response.headers.get('content-length'));
-  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
-    throw new MediaDownloadError('TOO_LARGE', `文件超过大小限制 ${maxBytes} 字节: ${truncate(url, 200)}`);
-  }
-
-  const buffer = Buffer.from(await response.arrayBuffer());
-  if (buffer.byteLength > maxBytes) {
-    throw new MediaDownloadError('TOO_LARGE', `文件超过大小限制 ${maxBytes} 字节: ${truncate(url, 200)}`);
-  }
-
-  return { bytes: buffer, contentType, url };
 }
 
 export function normalizeContentType(value: string | null): string {

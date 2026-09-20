@@ -22,7 +22,7 @@ function main(): void {
 
   const repos = createRepositories(database.db);
   // 支持 HTTPS_PROXY 的 fetch（国内环境访问 Twitter CDN 需要代理）
-  const fetchImpl = createProxyFetch();
+  const fetchImpl = createProxyFetch(process.env, [config.tweettoasterUrl]);
   const tweetToaster = new TweetToasterClient({ baseUrl: config.tweettoasterUrl, fetchImpl });
   // Bilibili 是国内服务，必须直连（走代理会因出口 IP 不一致触发 CSRF/风控）
   // 凭据唯一来源：数据目录下的 bili-cookies.json（由扫码登录工具写入，续期时回写）
@@ -49,6 +49,15 @@ function main(): void {
   // 来源检查循环（SOURCE_CHECK_INTERVAL，规格 §12）
   services.sourceValidation.start();
   console.log('[boot] source validation started');
+
+  const retryScreenshots = (): void => {
+    void services.newTweetProcessor.retryFailedScreenshots().catch((error) => {
+      console.error('[screenshot] retry failed:', error);
+    });
+  };
+  retryScreenshots();
+  const screenshotRetryTimer = setInterval(retryScreenshots, 60_000);
+  screenshotRetryTimer.unref?.();
 
   // Bilibili 会话体检 + bili_ticket 自动续期（每 6 小时；SESSDATA 失效前预警）
   const COOKIE_MAINTENANCE_MS = 6 * 60 * 60 * 1000;
@@ -134,6 +143,7 @@ function main(): void {
     console.log(`[boot] received ${signal}, closing...`);
     clearInterval(cookieTimer);
     clearInterval(mediaTimer);
+    clearInterval(screenshotRetryTimer);
     services.monitor.stop();
     services.sourceValidation.stop();
     apiServer.close();

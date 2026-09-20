@@ -27,6 +27,10 @@ export class SqliteTranslationService implements TranslationService {
   ) {}
 
   submit(tweetId: number, qqUserId: string, text: string): TranslationSubmitResult {
+    return this.translations.transaction(() => this.#submit(tweetId, qqUserId, text));
+  }
+
+  #submit(tweetId: number, qqUserId: string, text: string): TranslationSubmitResult {
     const tweet = this.tweets.findById(tweetId);
     if (!tweet) {
       throw new NotFoundError(`推文不存在: #${tweetId}`);
@@ -39,11 +43,10 @@ export class SqliteTranslationService implements TranslationService {
       throw new ValidationError('缺少提交者身份');
     }
 
+    // 先验证状态；与翻译写入共享事务，插入失败时状态也会回滚。
+    const updated = this.workflow.transition(tweetId, WorkflowStatus.TRANSLATED);
     const version = this.translations.nextVersion(tweetId);
     const translation = this.translations.create(tweetId, qqUserId.trim(), normalized, version);
-
-    // 工作流：提交翻译后进入 TRANSLATED（已翻译则保持幂等）。
-    const updated = this.workflow.transition(tweetId, WorkflowStatus.TRANSLATED);
 
     return { translation, workflowStatus: updated.workflowStatus };
   }

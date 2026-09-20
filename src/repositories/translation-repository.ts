@@ -24,6 +24,10 @@ function toDomain(row: TranslationRow): Translation {
 export class TranslationRepository {
   constructor(private readonly db: Database.Database) {}
 
+  transaction<T>(work: () => T): T {
+    return this.db.transaction(work).immediate();
+  }
+
   /** 计算 tweet 的下一个版本号（tweet 下最大版本 + 1，无记录时为 1）。 */
   nextVersion(tweetId: number): number {
     const row = this.db

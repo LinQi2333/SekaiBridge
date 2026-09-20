@@ -1,3 +1,4 @@
+import { consumeResponse } from '../http/response.js';
 import {
   TweetNotFoundError,
   TweetToasterError,
@@ -127,28 +128,24 @@ export class TweetToasterClient {
    * 用于主程序无法直连 Twitter CDN（pbs.twimg.com 等）的部署环境。
    */
   async downloadMedia(url: string): Promise<{ bytes: Buffer; contentType: string }> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    let response: Response;
     try {
-      response = await this.fetchImpl(
-        `${this.baseUrl}/api/media?url=${encodeURIComponent(url)}`,
-        { signal: controller.signal },
-      );
+      return await consumeResponse(this.fetchImpl,
+        `${this.baseUrl}/api/media?url=${encodeURIComponent(url)}`, {}, this.timeoutMs,
+        async (response) => {
+          if (!response.ok) {
+            throw new TweetToasterError(`媒体代理返回 HTTP ${response.status}: ${truncate(url, 200)}`);
+          }
+          const bytes = Buffer.from(await response.arrayBuffer());
+          const contentType = normalizeContentType(response.headers.get('content-type'));
+          return { bytes, contentType };
+        });
     } catch (error) {
+      if (error instanceof TweetToasterError) throw error;
       const timedOut = error instanceof Error && error.name === 'AbortError';
       throw new TweetToasterUnavailableError(
         timedOut ? `媒体代理请求超时: ${truncate(url, 200)}` : `媒体代理请求失败: ${truncate(url, 200)}`,
       );
-    } finally {
-      clearTimeout(timer);
     }
-    if (!response.ok) {
-      throw new TweetToasterError(`媒体代理返回 HTTP ${response.status}: ${truncate(url, 200)}`);
-    }
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const contentType = normalizeContentType(response.headers.get('content-type'));
-    return { bytes, contentType };
   }
 
   /** 轮询任务直到 SUCCESS / FAILURE，成功返回最终任务。 */
@@ -173,41 +170,32 @@ export class TweetToasterClient {
   }
 
   async #request(pathname: string, init: RequestInit = {}): Promise<unknown> {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    let response: Response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${pathname}`, {
+      return await consumeResponse(this.fetchImpl, `${this.baseUrl}${pathname}`, {
         ...init,
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
           ...init.headers,
         },
-        signal: controller.signal,
+      }, this.timeoutMs, async (response) => {
+        let payload: unknown = null;
+        try {
+          payload = await response.json();
+        } catch (error) {
+          if (!(error instanceof SyntaxError)) throw error;
+        }
+        if (!response.ok) this.#throwHttpError(response.status, payload);
+        return payload;
       });
     } catch (error) {
+      if (error instanceof TweetToasterError) throw error;
       const timedOut = error instanceof Error && error.name === 'AbortError';
       throw new TweetToasterUnavailableError(
-        timedOut
-          ? `TweetToaster 请求超时: ${pathname}`
+        timedOut ? `TweetToaster 请求超时: ${pathname}`
           : `无法连接 TweetToaster: ${error instanceof Error ? error.message : String(error)}`,
       );
-    } finally {
-      clearTimeout(timer);
     }
-
-    let payload: unknown = null;
-    try {
-      payload = await response.json();
-    } catch {
-      // 非 JSON 响应按错误处理
-    }
-
-    if (!response.ok) {
-      this.#throwHttpError(response.status, payload);
-    }
-    return payload;
   }
 
   #throwHttpError(status: number, payload: unknown): never {

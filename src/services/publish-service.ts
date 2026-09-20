@@ -9,7 +9,7 @@ import { TopicRepository } from '../repositories/topic-repository.js';
 import { TranslationRepository } from '../repositories/translation-repository.js';
 import { TweetRepository } from '../repositories/tweet-repository.js';
 import { log } from '../logger.js';
-import { NotFoundError, NotImplementedError, ValidationError } from './errors.js';
+import { IllegalTransitionError, NotFoundError, NotImplementedError, ValidationError } from './errors.js';
 import type { MediaLibrary } from './media-library.js';
 import type { WorkflowService } from './workflow-service.js';
 
@@ -102,8 +102,10 @@ export class DefaultPublishService implements PublishService {
       }
     }
 
-    // 进入发布中（合法转移由状态机保证：TRANSLATED / PUBLISH_FAILED → PUBLISHING）
-    this.workflow.transition(tweetId, WorkflowStatus.PUBLISHING, { lastError: null });
+    // 原子抢占合法的待发布状态；PUBLISHING 不能再次获得发布权。
+    if (!this.tweets.claimPublishing(tweetId)) {
+      throw new IllegalTransitionError(`#${tweetId} 正在发布或当前状态不允许发布`);
+    }
 
     try {
       // 只上传 photo（§21 / §53）；视频与视频封面永不进入 pics[]

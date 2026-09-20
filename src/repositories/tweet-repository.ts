@@ -78,6 +78,25 @@ export class DuplicateTweetError extends Error {
 export class TweetRepository {
   constructor(private readonly db: Database.Database) {}
 
+  /** 在外部发布前原子抢占，跨服务实例也只能有一个调用者成功。 */
+  claimPublishing(id: number): boolean {
+    return this.db.prepare(`UPDATE tweets
+      SET workflow_status = 'PUBLISHING', last_error = NULL, updated_at = datetime('now')
+      WHERE id = ? AND workflow_status IN ('TRANSLATED', 'READY_TO_PUBLISH', 'PUBLISH_FAILED')`)
+      .run(id).changes === 1;
+  }
+
+  /** 只重试失败的截图（兼容旧版仅记录 last_error）；不处理 bootstrap 历史推文。 */
+  listScreenshotRetries(limit = 100): Tweet[] {
+    const rows = this.db.prepare(`SELECT * FROM tweets
+      WHERE workflow_status = 'DETECTED' AND screenshot_path IS NULL
+        AND (retry_count > 0 OR last_error IS NOT NULL)
+        AND unixepoch('now') - unixepoch(updated_at)
+          >= MIN(3600, 30 * (1 << MIN(MAX(retry_count - 1, 0), 7)))
+      ORDER BY updated_at ASC LIMIT ?`).all(limit) as unknown as TweetRow[];
+    return rows.map(toDomain);
+  }
+
   /** 插入新推文。x_tweet_id 重复时抛 DuplicateTweetError。seq 按账号内递增。 */
   create(input: NewTweetInput): Tweet {
     const mediaJson = input.media && input.media.length > 0 ? JSON.stringify(input.media) : null;
