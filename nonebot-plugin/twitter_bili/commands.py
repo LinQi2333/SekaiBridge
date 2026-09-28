@@ -337,7 +337,7 @@ async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = C
     tr = data["data"]["result"]["translation"]
     extra = ""
     if tweet.get("workflowStatus") == "PUBLISHED":
-        extra = "\n\n⚠️ 该推文此前已发布：再次 !发布 会在 B 站生成一条新动态，旧动态需要自行删除。"
+        extra = "\n\n⚠️ 再次发布会在 B 站生成一条新动态"
     await bot.send(
         event,
         f"@{tweet['authorScreenName']} #{seq} 翻译已保存。\n\n当前版本：v{tr['version']}\n"
@@ -350,8 +350,8 @@ def publish_reply(screen_name: str, seq: str, result: dict) -> str:
     record = result["record"]
     lines = [f"@{screen_name} #{seq} 已发布。", "", "Bilibili Dynamic ID:", str(record["biliDynamicId"])]
     if result.get("republished"):
-        old = result.get("previousBiliDynamicId")
-        lines += ["", f"⚠️ 这是译文修订后的重新发布，旧动态（{old or '未知'}）需要自行删除。"]
+        # old = result.get("previousBiliDynamicId")
+        lines += ["", f"⚠️ 旧动态需要自行删除。"]
     return "\n".join(lines)
 
 
