@@ -9,6 +9,8 @@ from nonebot import on_command
 from nonebot.adapters.onebot.v11 import Bot, GroupMessageEvent, Message, MessageSegment
 from nonebot.params import CommandArg
 
+import re
+
 from .api import call_api, dedupe_message, error_text, file_uri
 from .forward import send_original_texts
 
@@ -57,6 +59,39 @@ def summarize(text: str, max_chars: int = 30) -> str:
     if len(flat) <= max_chars:
         return flat
     return flat[:max_chars] + "…"
+
+
+# QQ 等客户端会把 CR / U+2028 / U+2029 / NEL 也显示成换行，
+# 但它们不是 \n，用 partition("\n") 解析时会被漏掉（历史故障：翻译首行被吞）
+LINE_BREAK_PATTERN = re.compile(r"\r\n?|[\u2028\u2029\u0085]")
+
+
+def normalize_line_breaks(raw: str) -> str:
+    """把各种"看起来是换行"的字符统一成 \\n。"""
+    return LINE_BREAK_PATTERN.sub("\n", raw or "")
+
+
+def parse_translate_args(raw: str) -> tuple[str, str | None, str] | None:
+    """解析 !翻译 的参数，返回 (编号, @账号, 正文)；不合法返回 None。
+
+    首行形如 `<编号> [@账号] [正文首行]`：
+    - 正文首行写在编号后也会并入正文（旧实现会把它整个丢掉）
+    - 换行符先统一成 \\n，避免 CR/U+2028 之类导致首行被误吞
+    """
+    text = normalize_line_breaks(raw).strip()
+    if not text:
+        return None
+    first_line, _, rest = text.partition("\n")
+    match = re.match(r"^\s*(\d+)\s*(?:@(\S+))?\s*(.*)$", first_line)
+    if not match:
+        return None
+    seq = match.group(1)
+    account = match.group(2) or pick_account(first_line.split()[1:])
+    head = match.group(3).strip()
+    content = f"{head}\n{rest}" if head else rest
+    if not content.strip():
+        return None
+    return seq, account, content
 
 
 def pick_account(parts: list[str]) -> str | None:
@@ -278,14 +313,14 @@ async def handle_show(bot: Bot, event: GroupMessageEvent, args: Message = Comman
 async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = CommandArg()):
     if await precheck(event):
         return
-    text = args.extract_plain_text().strip()
-    first_line, _, content = text.partition("\n")
-    tokens = first_line.split()
-    if not tokens or not tokens[0].isdigit() or not content.strip():
-        await bot.send(event, "用法：!翻译 <编号> [@账号]\n翻译内容...（第二行开始是翻译正文）")
+    parsed = parse_translate_args(args.extract_plain_text())
+    if parsed is None:
+        await bot.send(
+            event,
+            "用法：!翻译 <编号> [@账号]\n翻译内容...（写在编号后，或从第二行开始）",
+        )
         return
-    seq = tokens[0]
-    account = pick_account(tokens[1:])
+    seq, account, content = parsed
     tweet, data = await resolve_tweet(event, seq, account)
     if tweet is None:
         await bot.send(event, error_text(data))

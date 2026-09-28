@@ -26,8 +26,12 @@ export interface TranslationSubmitResult {
 
 /**
  * 翻译文本规范化（规格 §28）：
- * 只允许 \r\n → \n，禁止删除 emoji、合并换行、润色、改写、繁简转换、AI 翻译等。
+ * 只统一"换行符写法"，禁止删除 emoji、合并空行、润色、改写、繁简转换、AI 翻译等。
+ *
+ * 统一的范围：CRLF / 单独的 CR / U+2028 / U+2029 / NEL(0x85) → `\n`。
+ * 这些字符在 QQ 等客户端里都显示为换行，但只有 `\n` 会被我们的解析逻辑识别，
+ * 历史上曾因此出现"翻译第一行被吞"的问题（命令行与正文之间是 CR 时）。
  */
 export function normalizeTranslationText(text: string): string {
-  return text.replace(/\r\n/g, '\n');
+  return text.replace(/\r\n?/g, '\n').replace(/[\u2028\u2029\u0085]/g, '\n');
 }
