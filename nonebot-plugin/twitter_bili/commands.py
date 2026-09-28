@@ -335,11 +335,24 @@ async def handle_translate(bot: Bot, event: GroupMessageEvent, args: Message = C
         await bot.send(event, error_text(data))
         return
     tr = data["data"]["result"]["translation"]
+    extra = ""
+    if tweet.get("workflowStatus") == "PUBLISHED":
+        extra = "\n\n⚠️ 该推文此前已发布：再次 !发布 会在 B 站生成一条新动态，旧动态需要自行删除。"
     await bot.send(
         event,
         f"@{tweet['authorScreenName']} #{seq} 翻译已保存。\n\n当前版本：v{tr['version']}\n"
-        f"状态：已翻译，等待发布。",
+        f"状态：已翻译，等待发布。{extra}",
     )
+
+
+def publish_reply(screen_name: str, seq: str, result: dict) -> str:
+    """发布/重试成功后的回复；重新发布时提示旧动态需要处理。"""
+    record = result["record"]
+    lines = [f"@{screen_name} #{seq} 已发布。", "", "Bilibili Dynamic ID:", str(record["biliDynamicId"])]
+    if result.get("republished"):
+        old = result.get("previousBiliDynamicId")
+        lines += ["", f"⚠️ 这是译文修订后的重新发布，旧动态（{old or '未知'}）需要自行删除。"]
+    return "\n".join(lines)
 
 
 @publish.handle()
@@ -360,8 +373,7 @@ async def handle_publish(bot: Bot, event: GroupMessageEvent, args: Message = Com
     body = {"topic_alias": alias} if alias else {}
     data = await call_api(f"/api/tweets/{tweet['id']}/publish", "POST", body, event)
     if data.get("ok"):
-        record = data["data"]["result"]["record"]
-        await bot.send(event, f"@{tweet['authorScreenName']} #{seq} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
+        await bot.send(event, publish_reply(tweet["authorScreenName"], seq, data["data"]["result"]))
     else:
         await bot.send(event, error_text(data))
 
@@ -382,8 +394,7 @@ async def handle_retry(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         return
     data = await call_api(f"/api/tweets/{tweet['id']}/retry", "POST", event=event)
     if data.get("ok"):
-        record = data["data"]["result"]["record"]
-        await bot.send(event, f"@{tweet['authorScreenName']} #{seq} 已发布。\n\nBilibili Dynamic ID:\n{record['biliDynamicId']}")
+        await bot.send(event, publish_reply(tweet["authorScreenName"], seq, data["data"]["result"]))
     else:
         await bot.send(event, error_text(data))
 

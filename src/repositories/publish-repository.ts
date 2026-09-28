@@ -87,4 +87,31 @@ export class PublishRepository {
       .run(tweetId, latest?.translationId ?? null, attemptCount, lastError);
     return this.findById(Number(info.lastInsertRowid)) as PublishRecord;
   }
+
+  /**
+   * 重新发布成功：**就地更新**那条 SUCCESS 记录（唯一索引 uq_publish_success_tweet
+   * 规定同一推文只能有一条 SUCCESS 记录），attempt_count 累加。
+   * 若此前没有 SUCCESS 记录则退化为新建。
+   */
+  replaceSuccess(input: NewPublishRecordInput): PublishRecord {
+    const info = this.db
+      .prepare(
+        `UPDATE publish_records
+            SET translation_id = ?, bili_dynamic_id = ?, bili_topic_id = ?,
+                status = 'SUCCESS', attempt_count = attempt_count + 1,
+                last_error = NULL, published_at = ?
+          WHERE tweet_id = ? AND status = 'SUCCESS'`,
+      )
+      .run(
+        input.translationId,
+        input.biliDynamicId ?? null,
+        input.biliTopicId ?? null,
+        new Date().toISOString(),
+        input.tweetId,
+      );
+    if (info.changes === 0) {
+      return this.create(input);
+    }
+    return this.findSuccessfulByTweet(input.tweetId) as PublishRecord;
+  }
 }

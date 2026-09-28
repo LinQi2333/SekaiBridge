@@ -72,7 +72,11 @@ export const WORKFLOW_TRANSITIONS: Readonly<Record<WorkflowStatus, readonly Work
     WorkflowStatus.PUBLISHING,
     WorkflowStatus.TRANSLATED,
   ],
-  [WorkflowStatus.PUBLISHED]: [],
+  // 已发布后仍允许"再翻译"：译文有误时可以提交新版本，
+  // 再次 !发布 会生成一条新动态（旧动态需人工处理）
+  [WorkflowStatus.PUBLISHED]: [
+    WorkflowStatus.TRANSLATED,
+  ],
 };
 
 /** 检查 from → to 是否为合法转移。 */

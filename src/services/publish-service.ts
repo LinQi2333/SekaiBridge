@@ -14,9 +14,13 @@ import type { MediaLibrary } from './media-library.js';
 import type { WorkflowService } from './workflow-service.js';
 
 export interface PublishResult {
-  /** 是否为新发布；false 表示幂等命中（已发布）。 */
+  /** 是否为新发布；false 表示幂等命中（已发布且译文未变）。 */
   published: boolean;
   record: PublishRecord;
+  /** true = 译文更新后的重新发布（B 站会多出一条动态）。 */
+  republished?: boolean;
+  /** 重新发布时，上一次成功的动态 ID（旧动态需自行处理）。 */
+  previousBiliDynamicId?: string | null;
 }
 
 /**
@@ -73,20 +77,38 @@ export class DefaultPublishService implements PublishService {
       throw new NotFoundError(`推文不存在: #${tweetId}`);
     }
 
-    // 幂等（§38）：已成功发布 → 不调用 Bilibili API
-    const existing = this.publishes.findSuccessfulByTweet(tweetId);
-    if (existing) {
-      log('bilibili.publish.idempotent', `#${tweetId} 已发布，跳过`);
-      return { published: false, record: existing };
-    }
-    if (tweet.workflowStatus === WorkflowStatus.PUBLISHED) {
-      throw new ValidationError(`#${tweetId} 已处于已发布状态但没有成功记录，请检查数据`);
-    }
-
     // 发布内容 = 最终翻译文本（§34）
     const translation = this.translations.findLatest(tweetId);
+
+    // 幂等（§38）+ 重新发布判定：
+    // 已成功发布过时，只有"发布用的那一版仍是最新翻译"才跳过；
+    // 若之后提交了新译文（PUBLISHED → TRANSLATED 允许再翻译），则视为重新发布。
+    const existing = this.publishes.findSuccessfulByTweet(tweetId);
+    let isRepublish = false;
+    let previousDynamicId: string | null = null;
+    if (existing) {
+      const publishedTranslationId = existing.translationId;
+      const republish =
+        publishedTranslationId !== null &&
+        translation !== null &&
+        translation.id !== publishedTranslationId;
+      if (!republish) {
+        log('bilibili.publish.idempotent', `#${tweetId} 已发布，跳过`);
+        return { published: false, record: existing };
+      }
+      isRepublish = true;
+      previousDynamicId = existing.biliDynamicId;
+      log(
+        'bilibili.publish.republish',
+        `#${tweetId} 译文已更新（发布时 translation=${publishedTranslationId}，现在=${translation.id}），重新发布（旧动态 ${previousDynamicId ?? '未知'}）`,
+      );
+    }
+
     if (!translation) {
       throw new ValidationError(`#${tweetId} 还没有翻译，请先提交翻译`);
+    }
+    if (!existing && tweet.workflowStatus === WorkflowStatus.PUBLISHED) {
+      throw new ValidationError(`#${tweetId} 已处于已发布状态但没有成功记录，请检查数据`);
     }
 
     // 话题：仅发布参数指定（已保存话题模型已移除，§33 新逻辑）
@@ -127,16 +149,29 @@ export class DefaultPublishService implements PublishService {
         // 不传别名作话题名：B 站校验 name 与 topic_id 匹配，别名会导致 4126130
         topicName: null,
       });
-      const record = this.publishes.create({
-        tweetId,
-        translationId: translation.id,
-        status: PublishStatus.SUCCESS,
-        biliDynamicId: dynamicId,
-        biliTopicId: topic?.biliTopicId ?? null,
-      });
+      const record = isRepublish
+        ? this.publishes.replaceSuccess({
+            tweetId,
+            translationId: translation.id,
+            status: PublishStatus.SUCCESS,
+            biliDynamicId: dynamicId,
+            biliTopicId: topic?.biliTopicId ?? null,
+          })
+        : this.publishes.create({
+            tweetId,
+            translationId: translation.id,
+            status: PublishStatus.SUCCESS,
+            biliDynamicId: dynamicId,
+            biliTopicId: topic?.biliTopicId ?? null,
+          });
       this.workflow.transition(tweetId, WorkflowStatus.PUBLISHED);
       log('bilibili.publish.complete', `#${tweetId} dynamic=${dynamicId}`);
-      return { published: true, record };
+      return {
+        published: true,
+        record,
+        republished: isRepublish,
+        previousBiliDynamicId: previousDynamicId,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.workflow.transition(tweetId, WorkflowStatus.PUBLISH_FAILED, { lastError: message });

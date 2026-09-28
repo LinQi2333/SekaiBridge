@@ -4,6 +4,7 @@ import { up as topicLibraryUp } from './003_topic_library.js';
 import { up as perAccountUp } from './004_per_account.js';
 import { up as normalizeAccountCaseUp } from './005_normalize_account_case.js';
 import { up as dropTopicNameUp } from './006_drop_topic_name.js';
+import { up as normalizeLegacyStatusesUp } from './007_normalize_legacy_statuses.js';
 
 export interface Migration {
   version: number;
@@ -22,4 +23,5 @@ export const migrations: readonly Migration[] = [
   { version: 4, name: 'per_account', up: perAccountUp },
   { version: 5, name: 'normalize_account_case', up: normalizeAccountCaseUp },
   { version: 6, name: 'drop_topic_name', up: dropTopicNameUp },
+  { version: 7, name: 'normalize_legacy_statuses', up: normalizeLegacyStatusesUp },
 ];
