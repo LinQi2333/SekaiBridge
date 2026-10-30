@@ -6,6 +6,43 @@ import { BilibiliApiError, BilibiliAuthError, BilibiliNetworkError } from './err
 import type { UploadedImage } from './image-upload.js';
 import { extractKeyFromImageUrl, signWbi, type WbiSignResult } from './wbi.js';
 
+/** 日志用：只取 URL 的主机名（避免把 query 里的凭据，如 SSO 地址中的 SESSDATA，写进日志）。 */
+export function hostOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * 把 undici 那句没有信息量的 `TypeError: fetch failed` 展开成可读原因。
+ * undici 把真实错误（DNS / TCP / TLS）放在 `error.cause` 里，
+ * 多地址连接失败时还可能是一个带 `errors[]` 的 AggregateError。
+ */
+export function describeNetworkError(error: unknown): string {
+  const err = error as { message?: unknown; cause?: unknown };
+  const parts: string[] = [];
+  const push = (item: unknown): void => {
+    const e = item as { code?: unknown; message?: unknown } | undefined;
+    const code = typeof e?.code === 'string' ? e.code : '';
+    const message = typeof e?.message === 'string' ? e.message : '';
+    if (code) parts.push(code);
+    if (message && message !== code) parts.push(message);
+  };
+  push(err?.cause);
+  const cause = err?.cause as { errors?: unknown[] } | undefined;
+  if (Array.isArray(cause?.errors)) {
+    for (const item of cause.errors) {
+      push(item);
+    }
+  }
+  const head =
+    typeof err?.message === 'string' && err.message.length > 0 ? err.message : String(error);
+  const unique = [...new Set(parts.filter((part) => part.length > 0))];
+  return unique.length > 0 ? `${head}（${unique.join(' / ')}）` : head;
+}
+
 /**
  * Bilibili 客户端配置。
  * 凭据**唯一来源**是 cookie 文件（由扫码登录工具写入），不再支持环境变量手工填 Cookie。
@@ -374,7 +411,9 @@ export class BilibiliClient {
       }
       const timedOut = error instanceof Error && error.name === 'AbortError';
       throw new BilibiliNetworkError(
-        timedOut ? `Bilibili 请求超时: ${url}` : `无法连接 Bilibili: ${String(error)}`,
+        timedOut
+          ? `Bilibili 请求超时（${hostOf(url)}，超过 ${Math.round(this.timeoutMs / 1000)}s）`
+          : `无法连接 Bilibili（${hostOf(url)}）：${describeNetworkError(error)}`,
       );
     }
   }
