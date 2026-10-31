@@ -54,26 +54,31 @@ async def call_api(
     method: str = "GET",
     body: dict | None = None,
     event: GroupMessageEvent | None = None,
+    timeout: float | None = None,
 ) -> dict:
     """调用主程序 API，返回 JSON（{ok, data} 或 {ok:false, error}）。
 
     注意：必须按 method 分派真实 HTTP 方法（PATCH/DELETE 不能走 POST），
     否则路由不匹配会 404。
+
+    timeout：本请求的等待上限（秒），默认沿用客户端配置（30s）。
+    下载媒体这类可能耗时几分钟的接口要显式放大，否则会先于服务端超时。
     """
     from nonebot import logger
 
     client = await get_client()
     headers = auth_headers(event)
     payload = body or {}
+    extra = {} if timeout is None else {"timeout": timeout}
     try:
         if method == "GET":
-            resp = await client.get(path, headers=headers)
+            resp = await client.get(path, headers=headers, **extra)
         elif method == "DELETE":
-            resp = await client.delete(path, headers=headers)
+            resp = await client.delete(path, headers=headers, **extra)
         elif method == "PATCH":
-            resp = await client.patch(path, headers=headers, json=payload)
+            resp = await client.patch(path, headers=headers, json=payload, **extra)
         else:
-            resp = await client.post(path, headers=headers, json=payload)
+            resp = await client.post(path, headers=headers, json=payload, **extra)
         logger.info(f"[tqb] {method} {path} -> HTTP {resp.status_code}")
         data = resp.json()
         logger.info(f"[tqb] 响应: {str(data)[:200]}")

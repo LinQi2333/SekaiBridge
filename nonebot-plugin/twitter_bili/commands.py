@@ -484,14 +484,18 @@ async def handle_media(bot: Bot, event: GroupMessageEvent, args: Message = Comma
     if tweet is None:
         await bot.send(event, error_text(data))
         return
-    data = await call_api(f"/api/tweets/{tweet['id']}/media", "POST", event=event)
+    title = f"@{tweet['authorScreenName']} #{seq}"
+    # 视频可能要下几分钟（慢带宽）：先回一条，避免群里以为没反应
+    await bot.send(event, f"{title} 正在准备媒体（视频可能需要几分钟，请稍候）…")
+    data = await call_api(
+        f"/api/tweets/{tweet['id']}/media", "POST", event=event, timeout=900
+    )
     if not data.get("ok"):
         await bot.send(event, error_text(data))
         return
     payload = data["data"]
     files = payload.get("files") or []
     skipped = payload.get("skipped") or []
-    title = f"@{tweet['authorScreenName']} #{seq}"
     if not files and not skipped:
         await bot.send(event, f"{title} 该推文没有可下载的媒体")
         return
@@ -510,9 +514,16 @@ async def handle_media(bot: Bot, event: GroupMessageEvent, args: Message = Comma
         except Exception as exc:  # noqa: BLE001 - 单个文件失败不影响其余
             failed.append(f"{item['name']}：{exc}")
 
-    lines = [f"{title} 媒体已上传到群文件：", *uploaded] if uploaded else [f"{title} 媒体上传失败"]
+    # 汇总一行：成功 / 跳过数量一眼可见；失败与跳过逐条说明原因
+    summary = f"{title} 媒体：成功 {len(uploaded)} 个，跳过 {len(skipped)} 个"
+    if failed:
+        summary += f"，上传失败 {len(failed)} 个"
+    lines = [summary]
+    lines.extend(uploaded)
     if failed:
         lines.append("上传失败：" + "；".join(failed))
     for item in skipped:
         lines.append(f"跳过 {item['name']}：{item['reason']}")
+    if not uploaded and skipped:
+        lines.append("（本次没有文件上传到群文件，原因见上）")
     await bot.send(event, "\n".join(lines))

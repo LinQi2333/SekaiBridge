@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { Tweet } from '../domain/tweet.js';
 import { parseMedia } from '../domain/tweet.js';
-import { EXT_BY_CONTENT_TYPE, IMAGE_CONTENT_TYPES, safeDownload } from '../media/safe-download.js';
+import { EXT_BY_CONTENT_TYPE, IMAGE_CONTENT_TYPES, megabytes, safeDownload } from '../media/safe-download.js';
 import type { MediaFetcher } from '../media/media-fetcher.js';
 import {
   mediaFileName,
@@ -59,7 +59,13 @@ export interface MediaLibraryOptions {
   fxBaseUrl: string;
   /** 单个媒体文件字节上限。 */
   maxBytes: number;
-  /** 下载超时（毫秒）。 */
+  /**
+   * 视频字节上限（默认 = maxBytes）。视频只用于上传 QQ 群文件，
+   * 超过群文件上限的视频即使下载完也传不上去，所以默认按群文件上限提前跳过，
+   * 既不浪费带宽也不会卡在"下载超时"上。
+   */
+  videoMaxBytes?: number;
+  /** 下载超时（毫秒）：响应头超时，同时作为正文空闲超时的默认值。 */
   timeoutMs?: number;
 }
 
@@ -75,6 +81,7 @@ export class DefaultMediaLibrary implements MediaLibrary {
   private readonly fetchImpl: typeof fetch;
   private readonly fxBaseUrl: string;
   private readonly maxBytes: number;
+  private readonly videoMaxBytes: number;
   private readonly timeoutMs: number;
 
   constructor(options: MediaLibraryOptions) {
@@ -84,6 +91,7 @@ export class DefaultMediaLibrary implements MediaLibrary {
     this.fetchImpl = options.fetchImpl ?? globalThis.fetch;
     this.fxBaseUrl = options.fxBaseUrl.replace(/\/+$/, '');
     this.maxBytes = options.maxBytes;
+    this.videoMaxBytes = options.videoMaxBytes ?? options.maxBytes;
     this.timeoutMs = options.timeoutMs ?? 300_000;
   }
 
@@ -106,11 +114,21 @@ export class DefaultMediaLibrary implements MediaLibrary {
         continue;
       }
       try {
-        const { bytes, contentType } = await this.#download(item);
+        const { bytes, contentType } = await this.#download(
+          item,
+          `#${tweet.id} ${item.kind}${index}`,
+        );
         const ext = extensionFor(item.kind, contentType);
         const name = mediaFileName(item.kind, index, ext);
-        if (bytes.byteLength > this.maxBytes) {
-          skipped.push({ name, reason: `超过单文件上限 ${mb(this.maxBytes)}MB` });
+        const limit = item.kind === 'video' ? this.videoMaxBytes : this.maxBytes;
+        if (bytes.byteLength > limit) {
+          skipped.push({
+            name,
+            reason:
+              item.kind === 'video' && limit < this.maxBytes
+                ? `超过群文件上限 ${mb(limit)}MB（未保存）`
+                : `超过单文件上限 ${mb(limit)}MB`,
+          });
           continue;
         }
         await fs.mkdir(dir, { recursive: true });
@@ -259,7 +277,7 @@ export class DefaultMediaLibrary implements MediaLibrary {
   }
 
   /** 下载单个媒体：图片优先 TweetToaster 代理（12MB 上限），其余直连。 */
-  async #download(item: RemoteMediaItem): Promise<{ bytes: Buffer; contentType: string }> {
+  async #download(item: RemoteMediaItem, label: string): Promise<{ bytes: Buffer; contentType: string }> {
     if (item.kind === 'photo') {
       try {
         return await this.fetcher(item.url);
@@ -269,11 +287,27 @@ export class DefaultMediaLibrary implements MediaLibrary {
     }
     const allowed =
       item.kind === 'video' ? ['video/mp4', 'application/octet-stream'] : IMAGE_CONTENT_TYPES;
+    const limit = item.kind === 'video' ? this.videoMaxBytes : this.maxBytes;
+    // 视频只用于上传群文件：超过群文件上限就不下载（Content-Length 预检，
+    // 避免白下几百 MB 之后才发现传不上去，或卡在超时上）
+    const label4Limit = item.kind === 'video' && limit < this.maxBytes ? '群文件上限' : '文件大小上限';
+    let lastLoggedMb = 0;
     const result = await safeDownload(item.url, {
-      maxBytes: this.maxBytes,
+      maxBytes: limit,
+      maxBytesLabel: label4Limit,
       allowedContentTypes: allowed,
       timeoutMs: this.timeoutMs,
       fetchImpl: this.fetchImpl,
+      onProgress: ({ received, total }) => {
+        const ranMb = Math.floor(received / (10 * 1024 * 1024));
+        if (ranMb > lastLoggedMb) {
+          lastLoggedMb = ranMb;
+          log(
+            'media.cache.progress',
+            `${label} 已下载 ${megabytes(received)}${total !== null ? `/${megabytes(total)}` : ''}`,
+          );
+        }
+      },
     });
     return { bytes: result.bytes, contentType: result.contentType };
   }

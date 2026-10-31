@@ -124,6 +124,8 @@ export function createServices(repos: Repositories, deps?: ServiceDeps): AppServ
         fetchImpl,
         fxBaseUrl: deps.config.fxTwitterBaseUrl,
         maxBytes: deps.config.mediaExportMaxMb * 1024 * 1024,
+        // 视频只用于 QQ 群文件：超过群文件上限就不下载（省带宽，也避免卡在下载超时）
+        videoMaxBytes: deps.config.maxGroupFileMb * 1024 * 1024,
       })
     : new StubMediaLibrary();
   const newTweetProcessor = new DefaultNewTweetProcessor({
